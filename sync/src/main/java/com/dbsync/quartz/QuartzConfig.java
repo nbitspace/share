@@ -39,14 +39,14 @@ public class QuartzConfig {
         .build();
     }
 
-    @Bean
-    public Scheduler scheduler(Trigger trigger, JobDetail job, SchedulerFactoryBean factory) 
-    throws SchedulerException {
-        Scheduler scheduler = factory.getScheduler();
-        scheduler.scheduleJob(job, trigger);
-        scheduler.start();
-        return scheduler;
-    }
+    // @Bean
+    // public Scheduler scheduler(Trigger trigger, JobDetail job, SchedulerFactoryBean factory) 
+    // throws SchedulerException {
+    //     Scheduler scheduler = factory.getScheduler();
+    //     scheduler.scheduleJob(job, trigger);
+    //     scheduler.start();
+    //     return scheduler;
+    // }
 
 
 }

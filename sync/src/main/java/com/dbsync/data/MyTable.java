@@ -22,5 +22,5 @@ public class MyTable {
     private String name;
     private String email;
     private Integer age;
-    private Integer completionStatus;
+    private Integer completionStatus = CompletionStatus.NOT_COMPLETED.getVal();
 }

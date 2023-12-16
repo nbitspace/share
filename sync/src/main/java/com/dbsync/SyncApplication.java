@@ -1,4 +1,4 @@
-package com.dbsync.sync;
+package com.dbsync;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,7 +11,7 @@ import com.dbsync.quartz.MyScheduler;
 
 @SpringBootApplication
 @EnableScheduling
-@ComponentScan("com.dbsync")
+@ComponentScan(basePackages = {"com.dbsync", "com.dbsync.data"})
 public class SyncApplication {
 	static final Logger logger = LoggerFactory.getLogger(SyncApplication.class);
 
