@@ -5,25 +5,11 @@ import fs from 'fs';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { google, calendar_v3 } from 'googleapis';
+import dotenv from 'dotenv';
+import { calculateDuration, calculateDurations } from '../utils/utils'; // Correct relative path
 
 let isSyncBoolean: boolean = false;
 let oldSyncBoolean: boolean = false;
-
-// Utility function to calculate the duration between two timestamps in minutes
-function calculateDuration(startDateTime: string | undefined, endDateTime: string | undefined): number {
-  if (!startDateTime || !endDateTime) {
-    return 0; // If either date is missing, return 0
-  }
-
-  const start = new Date(startDateTime);
-  const end = new Date(endDateTime);
-
-  // Calculate the difference in milliseconds
-  const durationInMs = end.getTime() - start.getTime();
-
-  // Convert milliseconds to minutes and return
-  return Math.floor(durationInMs / (1000 * 60)); // Duration in minutes
-}
 // Load OAuth 2.0 credentials
 const credentialsPath = path.join(__dirname, '../../credentials.json');
 const credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf-8'));
@@ -38,8 +24,9 @@ function mapTimeZone(timeZone: string): string {
 
   return timeZoneMapping[timeZone] || timeZone;
 }
-const customApiToken = 'eyJraWQiOiJZUU5JbzV0WnQ3UFZBbnRwNTZWYUhoVVJBSzJmOGlcL1FPbktvQTk4XC9wYzg9IiwiYWxnIjoiUlMyNTYifQ.eyJzdWIiOiI4MjNjMDkxNi05ZTlkLTRhOWMtODEzZi1hZDJjMDllYWMzOGIiLCJ6b25laW5mbyI6InRydWUiLCJlbWFpbF92ZXJpZmllZCI6ZmFsc2UsImlzcyI6Imh0dHBzOlwvXC9jb2duaXRvLWlkcC5hcC1zb3V0aC0xLmFtYXpvbmF3cy5jb21cL2FwLXNvdXRoLTFfZlhtWWxiZFlKIiwicGhvbmVfbnVtYmVyX3ZlcmlmaWVkIjp0cnVlLCJjb2duaXRvOnVzZXJuYW1lIjoiODIzYzA5MTYtOWU5ZC00YTljLTgxM2YtYWQyYzA5ZWFjMzhiIiwiZ2l2ZW5fbmFtZSI6Illhc2h3YW50aCIsImF1ZCI6IjV2ZTh1Z3ZtMTFkM2U2YWoxZWtobWpkbW04IiwiZXZlbnRfaWQiOiIzNGRlNWFiMi1lMzNlLTRjZjctODgxZC0wZWU4OGFmYzkwNDAiLCJ0b2tlbl91c2UiOiJpZCIsImF1dGhfdGltZSI6MTcyNTQ3NDIyOSwicGhvbmVfbnVtYmVyIjoiKzkxMTExMDAwNDQxMCIsImV4cCI6MTcyNTU2MDYyOSwiaWF0IjoxNzI1NDc0MjI5LCJmYW1pbHlfbmFtZSI6IkdDLTQiLCJlbWFpbCI6InRlc3RAZ21haWwuY29tIn0.geqDa4BGvpQzIIgjZpTGQryXswJyI_FrJkCUs3UTuSamcez34DbCrruky-47opTSr_bgduO7XgVf44ODrF6JGXACu3xhgPfoDDZmIIEsOkPVm5R6Q5RA_N-MLEcdLnZAHkcxHWioqkMin9p-zthVxLrAur6HFCbbCukqMzpwz2ULeG__6qpEZoXn7luSOS7a5AwBifhpcCZvj4YNMZ0nYrs9eorWTokwp0rWI_FXhlgstS362ya4JJhNj7n2w9x7qcHs6Wz7wCHlv1K9yHpoDJFzwfxZvtFlwqEbiHqItuadyTrjGpbsP2jfj-Wq0tdZPwuvusHqqLJwntIRKXXKog';
+dotenv.config();
 // Set up OAuth 2.0 client
+const customApiToken = process.env.CUSTOM_API_TOKEN;
 const redirectUri = credentials.web.redirect_uris[0];
 const oAuth2Client = new google.auth.OAuth2(
   credentials.web.client_id,
@@ -48,10 +35,10 @@ const oAuth2Client = new google.auth.OAuth2(
 );
 
 const calendar = google.calendar({ version: 'v3', auth: oAuth2Client });
+const tokenPath = path.join(__dirname, '..', 'token.json');
 
 // Utility function to set OAuth 2.0 credentials
 async function authenticate() {
-  const tokenPath = path.join(__dirname, '..', 'token.json');
   if (fs.existsSync(tokenPath)) {
     const token = JSON.parse(fs.readFileSync(tokenPath, 'utf-8'));
     oAuth2Client.setCredentials(token);
@@ -113,14 +100,6 @@ async function getAuthenticatedUserEmail(): Promise<string> {
     throw new Error('Failed to fetch user email');
   }
 }
-
-// Function to calculate durations
-function calculateDurations(start: string, end: string): number {
-  const startTime = new Date(start).getTime();
-  const endTime = new Date(end).getTime();
-  return (endTime - startTime) / (1000 * 60); // duration in minutes
-}
-
 // Process webhook event
 export const processWebhookEvent = async (req: Request, res: Response) => {
   try {
@@ -132,7 +111,7 @@ export const processWebhookEvent = async (req: Request, res: Response) => {
     console.log('Webhook body:', req.body);
 
     // Fetch the authenticated user's email
-    const userEmail = await getAuthenticatedUserEmail();
+    const userEmail ='nbitspace01@gmail.com'// await getAuthenticatedUserEmail();
 
     // Fetch the full event details from Google Calendar using the event ID
     const eventDetails = await getEventDetails(event_id);
@@ -261,6 +240,7 @@ export const handleCalendarWebhook = async (req: Request, res: Response) => {
 
 export const syncOldGoogleCalendarEvents = async (userId: string) => {
   try {
+
     const credentials = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'token.json'), 'utf-8'));
     const oAuth2Client = new google.auth.OAuth2(
       '27988681367-s11eg058duue72oveo0lkjj4v8af6vjh.apps.googleusercontent.com',
@@ -355,6 +335,7 @@ export const getEvents = async (req: Request, res: Response) => {
       singleEvents: true,
       orderBy: 'startTime',
     });
+    console.log('req.query:', req.query);
 
     // Log the full response for debugging
     console.log('Google Calendar API response:', response.data);
