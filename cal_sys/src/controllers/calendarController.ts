@@ -1,11 +1,10 @@
-import { formatISO, subDays } from 'date-fns';
-import { Request, Response } from 'express';
-import path from 'path';
-import fs from 'fs';
 import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
-import { google, calendar_v3 } from 'googleapis';
 import dotenv from 'dotenv';
+import { Request, Response } from 'express';
+import fs from 'fs';
+import { calendar_v3, google } from 'googleapis';
+import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { calculateDuration, calculateDurations } from '../utils/utils'; // Correct relative path
 
 let isSyncBoolean: boolean = false;
@@ -17,10 +16,9 @@ const baseURL = 'https://qa-events.amurahealth.com:3000';
 // Utility function to map custom time zones to IANA time zones
 function mapTimeZone(timeZone: string): string {
   const timeZoneMapping: Record<string, string> = {
-    'indianStandardTime': 'Asia/Kolkata', // Example: Mapping custom time zone to IANA time zone
+    indianStandardTime: 'Asia/Kolkata' // Example: Mapping custom time zone to IANA time zone
     // Add other mappings if needed
   };
-
 
   return timeZoneMapping[timeZone] || timeZone;
 }
@@ -54,31 +52,33 @@ export const watchGoogleCalendar = async (req: Request, res: Response) => {
 
     const uniqueChannelId = uuidv4(); // Generate a unique ID
 
-
     const response = await calendar.events.watch({
       calendarId: 'primary',
       requestBody: {
         id: uniqueChannelId,
         type: 'web_hook',
-        address: 'https://eoi7erk35cc5yfe.m.pipedream.net/',
-      },
+        address: 'https://eoi7erk35cc5yfe.m.pipedream.net/'
+      }
     });
 
     console.log('Watch response:', response.data);
     res.status(200).json(response.data);
   } catch (error) {
     console.error('Error setting up calendar watch:', error);
-    res.status(500).json({ error: error instanceof Error ? error.message : 'An unknown error occurred' });
+    res.status(500).json({
+      error:
+        error instanceof Error ? error.message : 'An unknown error occurred'
+    });
   }
 };
 
-
-
-async function getEventDetails(eventId: string): Promise<calendar_v3.Schema$Event> {
+async function getEventDetails(
+  eventId: string
+): Promise<calendar_v3.Schema$Event> {
   try {
     const response = await calendar.events.get({
       calendarId: 'primary',
-      eventId: eventId,
+      eventId: eventId
     });
 
     return response.data;
@@ -100,6 +100,7 @@ async function getAuthenticatedUserEmail(): Promise<string> {
     throw new Error('Failed to fetch user email');
   }
 }
+
 // Process webhook event
 export const processWebhookEvent = async (req: Request, res: Response) => {
   try {
@@ -111,21 +112,13 @@ export const processWebhookEvent = async (req: Request, res: Response) => {
     console.log('Webhook body:', req.body);
 
     // Fetch the authenticated user's email
-    const userEmail ='nbitspace01@gmail.com'// await getAuthenticatedUserEmail();
+    const userEmail = 'nbitspace01@gmail.com'; // await getAuthenticatedUserEmail();
 
     // Fetch the full event details from Google Calendar using the event ID
     const eventDetails = await getEventDetails(event_id);
-     // Extract event details
-     const {
-      summary,
-      start,
-      end,
-      attendees,
-      description,
-      status,
-      visibility,
-      
-    } = eventDetails;
+    // Extract event details
+    const { summary, start, end, attendees, description, status, visibility } =
+      eventDetails;
     const timeZone = eventDetails.start?.timeZone || 'UTC';
 
     // Prepare the event data for Amura
@@ -140,7 +133,10 @@ export const processWebhookEvent = async (req: Request, res: Response) => {
       fromTime: start?.dateTime || start?.date || '',
       toDate: end?.dateTime || end?.date || '',
       toTime: end?.dateTime || end?.date || '',
-      duration: calculateDurations(start?.dateTime || start?.date || '', end?.dateTime || end?.date || ''),
+      duration: calculateDurations(
+        start?.dateTime || start?.date || '',
+        end?.dateTime || end?.date || ''
+      ),
       repeatType: 'doesntRepeat',
       reccurance: {}, // Add recurrence details if available
       tenantId: 'amura',
@@ -155,16 +151,20 @@ export const processWebhookEvent = async (req: Request, res: Response) => {
       description: description || '',
       permissons: [],
       organizerRoleId: '', // Define this if necessary
-      notifyTimeInMinutes: [10], // Customize this as needed
+      notifyTimeInMinutes: [10] // Customize this as needed
     };
 
     // Send the event data to the Amura API
-    const customApiResponse = await axios.post(`${baseURL}/scheduler/event/createEvent`, eventData, {
-      headers: {
-        'Authorization': `Bearer ${customApiToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const customApiResponse = await axios.post(
+      `${baseURL}/scheduler/event/createEvent`,
+      eventData,
+      {
+        headers: {
+          Authorization: `Bearer ${customApiToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
     console.log('Event created successfully in Amura:', customApiResponse.data);
     res.status(200).send('Event processed successfully');
@@ -173,6 +173,7 @@ export const processWebhookEvent = async (req: Request, res: Response) => {
     res.status(500).send('Internal Server Error');
   }
 };
+
 // Existing webhook handler
 export const handleCalendarWebhook = async (req: Request, res: Response) => {
   try {
@@ -186,12 +187,14 @@ export const handleCalendarWebhook = async (req: Request, res: Response) => {
       const eventId = req.body.id;
       const eventResponse = await calendar.events.get({
         calendarId: 'primary',
-        eventId,
+        eventId
       });
 
       const event = eventResponse.data;
-      const startDateTime = event.start?.dateTime || event.start?.date || new Date().toISOString();
-      const endDateTime = event.end?.dateTime || event.end?.date || new Date().toISOString();
+      const startDateTime =
+        event.start?.dateTime || event.start?.date || new Date().toISOString();
+      const endDateTime =
+        event.end?.dateTime || event.end?.date || new Date().toISOString();
 
       const amuraEvent = {
         userId: userId,
@@ -208,7 +211,8 @@ export const handleCalendarWebhook = async (req: Request, res: Response) => {
         tenantId: 'amura',
         notify: [],
         tenantParticipants: [],
-        externalParticipants: event.attendees?.map(attendee => attendee.email) || [],
+        externalParticipants:
+          event.attendees?.map((attendee) => attendee.email) || [],
         isExcludeMeFromEvent: false,
         visibility: event.visibility || 'private',
         status: event.status || 'confirmed',
@@ -217,15 +221,19 @@ export const handleCalendarWebhook = async (req: Request, res: Response) => {
         description: event.description || '',
         permissons: [],
         organizerRoleId: '',
-        notifyTimeInMinutes: [10],
+        notifyTimeInMinutes: [10]
       };
 
-      await axios.post('https://qa-events.amurahealth.com:3000/scheduler/event/createEvent', amuraEvent, {
-        headers: {
-          'Authorization': `Bearer ${customApiToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      await axios.post(
+        'https://qa-events.amurahealth.com:3000/scheduler/event/createEvent',
+        amuraEvent,
+        {
+          headers: {
+            Authorization: `Bearer ${customApiToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
 
       res.status(200).send('Event synced successfully');
     } else {
@@ -237,11 +245,11 @@ export const handleCalendarWebhook = async (req: Request, res: Response) => {
   }
 };
 
-
 export const syncOldGoogleCalendarEvents = async (userId: string) => {
   try {
-
-    const credentials = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'token.json'), 'utf-8'));
+    const credentials = JSON.parse(
+      fs.readFileSync(path.join(__dirname, '..', 'token.json'), 'utf-8')
+    );
     const oAuth2Client = new google.auth.OAuth2(
       '27988681367-s11eg058duue72oveo0lkjj4v8af6vjh.apps.googleusercontent.com',
       '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',
@@ -261,15 +269,19 @@ export const syncOldGoogleCalendarEvents = async (userId: string) => {
         maxResults: 10,
         singleEvents: true,
         orderBy: 'startTime',
-        pageToken: pageToken || undefined,
+        pageToken: pageToken || undefined
       });
 
       const events = response.data.items || [];
       moreEvents = !!response.data.nextPageToken;
       pageToken = response.data.nextPageToken || undefined;
       for (const event of events) {
-        const startDateTime = event.start?.dateTime || event.start?.date || new Date().toISOString();
-        const endDateTime = event.end?.dateTime || event.end?.date || new Date().toISOString();
+        const startDateTime =
+          event.start?.dateTime ||
+          event.start?.date ||
+          new Date().toISOString();
+        const endDateTime =
+          event.end?.dateTime || event.end?.date || new Date().toISOString();
 
         const eventData = {
           userId,
@@ -288,7 +300,8 @@ export const syncOldGoogleCalendarEvents = async (userId: string) => {
           tenantId: 'amura',
           notify: [],
           tenantParticipants: [],
-          externalParticipants: event.attendees?.map(attendee => attendee.email) || [],
+          externalParticipants:
+            event.attendees?.map((attendee) => attendee.email) || [],
           isExcludeMeFromEvent: false,
           visibility: event.visibility || 'private',
           status: event.status || 'confirmed',
@@ -297,25 +310,32 @@ export const syncOldGoogleCalendarEvents = async (userId: string) => {
           description: event.description || '',
           permissons: [],
           organizerRoleId: '',
-          notifyTimeInMinutes: [10],
+          notifyTimeInMinutes: [10]
         };
 
         try {
           // Send event data to Amura API
-          await axios.post(`${baseURL}/scheduler/event/createEvent`, eventData, {
-            headers: {
-              'Authorization': `Bearer ${customApiToken}`,
-              'Content-Type': 'application/json',
-            },
-          });
+          await axios.post(
+            `${baseURL}/scheduler/event/createEvent`,
+            eventData,
+            {
+              headers: {
+                Authorization: `Bearer ${customApiToken}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
           console.log(`Event "${eventData.title}" synced successfully.`);
         } catch (postError) {
-          console.error(`Failed to sync event "${eventData.title}":`, postError);
+          console.error(
+            `Failed to sync event "${eventData.title}":`,
+            postError
+          );
         }
       }
 
       // Optional: Add delay to prevent hitting API rate limits
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
     console.log('All events synced to Amura');
@@ -323,7 +343,62 @@ export const syncOldGoogleCalendarEvents = async (userId: string) => {
     console.error('Error syncing old events:', error);
   }
 };
+
 // Get events
+/**
+ * @swagger
+ * /events:
+ *   get:
+ *     summary: Fetch upcoming events from Google Calendar
+ *     tags: [Events]
+ *     parameters:
+ *       - in: query
+ *         name: maxResults
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: The maximum number of events to return
+ *       - in: query
+ *         name: timeMin
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: The start time for fetching events (default is current time)
+ *     responses:
+ *       200:
+ *         description: Events fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Events fetched successfully
+ *                 events:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       summary:
+ *                         type: string
+ *                       description:
+ *                         type: string
+ *                       start:
+ *                         type: object
+ *                       end:
+ *                         type: object
+ *                       attendees:
+ *                         type: array
+ *                       organizer:
+ *                         type: object
+ *       400:
+ *         description: Bad request - invalid input parameters
+ *       500:
+ *         description: Server error
+ */
 export const getEvents = async (req: Request, res: Response) => {
   try {
     await authenticate();
@@ -333,7 +408,7 @@ export const getEvents = async (req: Request, res: Response) => {
       timeMin: new Date().toISOString(),
       maxResults: 10,
       singleEvents: true,
-      orderBy: 'startTime',
+      orderBy: 'startTime'
     });
     console.log('req.query:', req.query);
 
@@ -353,14 +428,97 @@ export const getEvents = async (req: Request, res: Response) => {
       console.log('No data or items found in the response');
       res.status(200).json(response.data);
     }
-
   } catch (error) {
     console.error('Error fetching events:', error);
-    res.status(500).json({ error: error instanceof Error ? error.message : 'An unknown error occurred' });
+    res.status(500).json({
+      error:
+        error instanceof Error ? error.message : 'An unknown error occurred'
+    });
   }
 };
 
 // Create an event
+/**
+ * @swagger
+ * /events:
+ *   post:
+ *     summary: Create a new event in Google Calendar
+ *     tags: [Events]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - fromTime
+ *               - toTime
+ *               - timeZone
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 description: The title of the event
+ *               description:
+ *                 type: string
+ *                 description: Optional description of the event
+ *               fromTime:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Start time of the event (ISO 8601 format)
+ *               toTime:
+ *                 type: string
+ *                 format: date-time
+ *                 description: End time of the event (ISO 8601 format)
+ *               timeZone:
+ *                 type: string
+ *                 description: Time zone for the event
+ *               externalParticipants:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: email
+ *                 description: List of external participants' email addresses
+ *               notifyTimeInMinutes:
+ *                 type: array
+ *                 items:
+ *                   type: number
+ *                 description: List of reminder times in minutes before the event
+ *     responses:
+ *       201:
+ *         description: Event created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Event created successfully.
+ *                 event:
+ *                   type: object
+ *                   description: The created event object from Google Calendar
+ *       400:
+ *         description: Bad request - missing required fields or invalid input
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Missing required fields
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: An unknown error occurred
+ */
 export const createEvent = async (req: Request, res: Response) => {
   try {
     await authenticate();
@@ -373,28 +531,30 @@ export const createEvent = async (req: Request, res: Response) => {
       description: req.body.description || '',
       start: {
         dateTime: req.body.fromTime,
-        timeZone: timeZone,  // Use the mapped time zone here
+        timeZone: timeZone // Use the mapped time zone here
       },
       end: {
         dateTime: req.body.toTime,
-        timeZone: timeZone,  // Use the mapped time zone here
+        timeZone: timeZone // Use the mapped time zone here
       },
-      attendees: req.body.externalParticipants.map((email: string) => ({ email })),
+      attendees: req.body.externalParticipants.map((email: string) => ({
+        email
+      })),
       reminders: {
         useDefault: false,
         overrides: req.body.notifyTimeInMinutes.map((minutes: number) => ({
           method: 'popup',
-          minutes,
-        })),
-      },
+          minutes
+        }))
+      }
     };
 
     // Create event in Google Calendar
     const googleResponse = await calendar.events.insert({
       calendarId: 'primary',
-      requestBody: event,
+      requestBody: event
     });
-/*
+    /*
     // Prepare the event data for the custom API
     const eventData = {
       userId: req.body.userId,
@@ -437,15 +597,87 @@ export const createEvent = async (req: Request, res: Response) => {
     res.status(200).json({
       status: 200,
       message: 'Event created successfully.',
-      googleCalendar: googleResponse.data,
-    //  customApi: customApiResponse.data,
+      googleCalendar: googleResponse.data
+      //  customApi: customApiResponse.data,
     });
   } catch (error) {
     console.error('Error creating event:', error);
-    res.status(500).json({ error: error instanceof Error ? error.message : 'An unknown error occurred' });
+    res.status(500).json({
+      error:
+        error instanceof Error ? error.message : 'An unknown error occurred'
+    });
   }
 };
+
 // Update an event
+/**
+ * @swagger
+ * /events:
+ *   put:
+ *     summary: Update an existing event in Google Calendar and custom API
+ *     tags: [Events]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - eventId
+ *               - title
+ *               - fromTime
+ *               - toTime
+ *               - timeZone
+ *             properties:
+ *               eventId:
+ *                 type: string
+ *                 description: The ID of the event to update
+ *               title:
+ *                 type: string
+ *                 description: The updated title of the event
+ *               description:
+ *                 type: string
+ *                 description: Updated description of the event
+ *               fromTime:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Updated start time of the event (ISO 8601 format)
+ *               toTime:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Updated end time of the event (ISO 8601 format)
+ *               timeZone:
+ *                 type: string
+ *                 description: Updated time zone for the event
+ *               externalParticipants:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: email
+ *                 description: Updated list of external participants' email addresses
+ *               # ... other fields as needed
+ *     responses:
+ *       200:
+ *         description: Event updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Event updated successfully
+ *                 googleCalendar:
+ *                   type: object
+ *                   description: The updated event object from Google Calendar
+ *                 customApi:
+ *                   type: object
+ *                   description: The response from the custom API
+ *       400:
+ *         description: Bad request - missing required fields or invalid input
+ *       500:
+ *         description: Server error
+ */
 export const updateEvent = async (req: Request, res: Response) => {
   try {
     await authenticate();
@@ -456,20 +688,22 @@ export const updateEvent = async (req: Request, res: Response) => {
       description: req.body.description,
       start: {
         dateTime: req.body.fromTime,
-        timeZone: req.body.timeZone,
+        timeZone: req.body.timeZone
       },
       end: {
         dateTime: req.body.toTime,
-        timeZone: req.body.timeZone,
+        timeZone: req.body.timeZone
       },
-      attendees: req.body.externalParticipants.map((email: string) => ({ email })),
+      attendees: req.body.externalParticipants.map((email: string) => ({
+        email
+      }))
     };
 
     // Update event in Google Calendar
     const googleResponse = await calendar.events.update({
       calendarId: 'primary',
       eventId,
-      requestBody: event,
+      requestBody: event
     });
 
     // Prepare the event data for the custom API
@@ -498,38 +732,104 @@ export const updateEvent = async (req: Request, res: Response) => {
       callType: req.body.callType || 'video',
       others: req.body.others || '',
       description: req.body.description || '',
-      permissons: req.body.permissons || [],
+      permissons: req.body.permissons || []
     };
 
     // Send a request to the custom API to update the event
-    const customApiResponse = await axios.put(`${baseURL}/scheduler/event/updateEvent`, eventData, {
-      headers: {
-        'Authorization': `Bearer ${customApiToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const customApiResponse = await axios.put(
+      `${baseURL}/scheduler/event/updateEvent`,
+      eventData,
+      {
+        headers: {
+          Authorization: `Bearer ${customApiToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
     // Combine responses or handle as needed
     res.status(200).json({
       googleCalendar: googleResponse.data,
-      customApi: customApiResponse.data,
+      customApi: customApiResponse.data
     });
   } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : 'An unknown error occurred' });
+    res.status(500).json({
+      error:
+        error instanceof Error ? error.message : 'An unknown error occurred'
+    });
   }
 };
 
 // Delete an event
+/**
+ * @swagger
+ * /events:
+ *   delete:
+ *     summary: Delete an event from Google Calendar and custom API
+ *     tags: [Events]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - eventId
+ *               - userId
+ *               - organizer
+ *             properties:
+ *               eventId:
+ *                 type: string
+ *                 description: The ID of the event to delete
+ *               userId:
+ *                 type: string
+ *                 description: The ID of the user deleting the event
+ *               organizer:
+ *                 type: string
+ *                 description: The organizer of the event
+ *               title:
+ *                 type: string
+ *                 description: The title of the event
+ *               eventType:
+ *                 type: string
+ *                 description: The type of the event
+ *               timeZone:
+ *                 type: string
+ *                 description: The time zone of the event
+ *               # ... other fields as needed
+ *     responses:
+ *       200:
+ *         description: Event deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Event deleted successfully
+ *                 customApi:
+ *                   type: object
+ *                   description: The response from the custom API
+ *       400:
+ *         description: Bad request - missing required fields
+ *       500:
+ *         description: Server error
+ */
 export const deleteEvent = async (req: Request, res: Response) => {
   try {
     await authenticate();
 
     const eventId = req.body.eventId;
 
+    if (!eventId) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
     // Delete event from Google Calendar
     await calendar.events.delete({
       calendarId: 'primary',
-      eventId,
+      eventId
     });
 
     // Prepare the delete data for the custom API
@@ -560,23 +860,29 @@ export const deleteEvent = async (req: Request, res: Response) => {
       permissons: req.body.permissons || [],
       parentId: req.body.parentId,
       updatedBy: req.body.updatedBy,
-      deleteObject: req.body.deleteObject,
+      deleteObject: req.body.deleteObject
     };
 
     // Send a request to the custom API to delete the event
-    const customApiResponse = await axios.post(`${baseURL}/scheduler/event/deleteEvent`, deleteData, {
-      headers: {
-        'Authorization': `Bearer ${customApiToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const customApiResponse = await axios.post(
+      `${baseURL}/scheduler/event/deleteEvent`,
+      deleteData,
+      {
+        headers: {
+          Authorization: `Bearer ${customApiToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
-    res.status(200).json({ 
+    res.status(200).json({
       message: 'Event deleted successfully',
-      customApi: customApiResponse.data,
+      customApi: customApiResponse.data
     });
   } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : 'An unknown error occurred' });
+    res.status(500).json({
+      error:
+        error instanceof Error ? error.message : 'An unknown error occurred'
+    });
   }
 };
- 
