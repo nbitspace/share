@@ -11,6 +11,7 @@ import nodemailer from 'nodemailer';
 import calendarRouter from './routes/calendarRoutes';
 import { setupSwagger } from './swaggerConfig';
 import { watchGoogleCalendar, syncOldGoogleCalendarEvents, processWebhookEvent, createEvent, getEvents } from './controllers/calendarController';
+import { checkAndRefreshToken, refreshTokenScheduler } from './tokenManager';
 
 const app = express();
 const server = http.createServer(app);
@@ -41,9 +42,14 @@ const tokenPath = path.join(__dirname, '..', 'token.json');
 app.get('/auth', (req, res) => {
   const authUrl = oAuth2Client.generateAuthUrl({
     access_type: 'offline',
-    scope: ['https://www.googleapis.com/auth/calendar'],
+    scope: [
+      'https://www.googleapis.com/auth/calendar',      // Existing scope for Calendar API
+      'https://www.googleapis.com/auth/userinfo.profile', // Scope for user profile info
+      'https://www.googleapis.com/auth/userinfo.email'   // Scope for user email info
+    ],
     redirect_uri: process.env.REDIRECT_URI_4
   });
+  
 
   res.redirect(authUrl);
 });
@@ -68,15 +74,31 @@ app.get('/auth', (req, res) => {
  *         description: Code not found in query parameters
  *       500:
  *         description: Authentication failed
- */
-app.get('/', async (req, res) => {
+ */app.get('/', async (req, res) => {
   const code = req.query.code as string | undefined;
   if (code) {
     try {
-      const response = await oAuth2Client.getToken(code);
-      const tokens = response.tokens;
+      const { tokens } = await oAuth2Client.getToken(code);
       oAuth2Client.setCredentials(tokens);
+
+      // Save tokens to a file
       fs.writeFileSync(path.join(__dirname, '..', 'token.json'), JSON.stringify(tokens));
+
+      // Set the OAuth 2.0 client credentials
+      oAuth2Client.setCredentials({
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        expiry_date: tokens.expiry_date,
+      });
+
+      // Fetch the user's profile
+      const oauth2 = google.oauth2({ auth: oAuth2Client, version: 'v2' });
+      const userInfo = await oauth2.userinfo.get();
+
+      // Optionally, save the user's email for later use
+      const email = userInfo.data.email || 'unknown';
+      fs.writeFileSync(path.join(__dirname, '..', 'email.txt'), email);
+
       res.send('Authentication successful! You can close this tab.');
     } catch (error) {
       console.error('Error during OAuth callback:', error);
@@ -86,6 +108,7 @@ app.get('/', async (req, res) => {
     res.status(400).send('No code found in query parameters');
   }
 });
+
 
 /**
  * @swagger
@@ -103,7 +126,12 @@ app.get('/sync', async (req, res) => {
   try {
     const tokens = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'token.json'), 'utf-8'));
     oAuth2Client.setCredentials(tokens);
-    await syncOldGoogleCalendarEvents('nbitspace01@gmail.com');
+
+      // Read the email from the saved file
+      const email = fs.readFileSync(path.join(__dirname, '..', 'email.txt'), 'utf-8');
+
+      // Use the email here
+      await syncOldGoogleCalendarEvents(email);
     res.send('Synchronization completed!');
   } catch (error) {
     console.error('Error syncing old events:', error);
@@ -139,6 +167,7 @@ app.get('/webhookcall', async (req, res) => {
 });
 
 // Serve static files (if needed)
+app.use('/calendar', checkAndRefreshToken, calendarRouter);
 app.use('/calendar', express.static(path.join(__dirname, '../../public')));
 app.post('/webhook', processWebhookEvent);
 app.use('/calendar', calendarRouter);

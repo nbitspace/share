@@ -10,13 +10,12 @@ import {
 } from '../controllers/calendarController';
 
 const router = Router();
-
 /**
  * @swagger
- * /events:
+ * /calendar/events:
  *   get:
  *     summary: Get all events
- *     description: Retrieve a list of events from the Google Calendar
+ *     description: Retrieve a list of events from the Google Calendar.
  *     responses:
  *       200:
  *         description: A list of events
@@ -40,9 +39,10 @@ const router = Router();
  */
 router.get('/events', getEvents);
 
+
 /**
  * @swagger
- * /events:
+ * /calendar/events:
  *   post:
  *     summary: Create a new event
  *     description: Create a new event in the Google Calendar
@@ -78,7 +78,7 @@ router.post('/events', createEvent);
 
 /**
  * @swagger
- * /events:
+ * /calendar/events:
  *   put:
  *     summary: Update an event
  *     description: Update an existing event in the Google Calendar
@@ -107,7 +107,7 @@ router.put('/events', updateEvent);
 
 /**
  * @swagger
- * /events:
+ * /calendar/events:
  *   delete:
  *     summary: Delete an event
  *     description: Delete an event from the Google Calendar
@@ -152,7 +152,7 @@ router.post('/webhook', handleCalendarWebhook);
  *       200:
  *         description: Watching for calendar changes successfully
  */
-router.get('/calendar/watch', watchGoogleCalendar);
+router.get('/watch', watchGoogleCalendar);
 
 /**
  * @swagger
@@ -164,6 +164,6 @@ router.get('/calendar/watch', watchGoogleCalendar);
  *       200:
  *         description: Old events synchronized successfully
  */
-router.get('/calendar/sync', syncOldGoogleCalendarEvents);
+router.get('/sync', syncOldGoogleCalendarEvents);
 
 export default router;
