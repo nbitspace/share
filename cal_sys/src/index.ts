@@ -12,13 +12,20 @@ import calendarRouter from './routes/calendarRoutes';
 import { setupSwagger } from './swaggerConfig';
 import { watchGoogleCalendar, syncOldGoogleCalendarEvents, processWebhookEvent, createEvent, getEvents } from './controllers/calendarController';
 import { checkAndRefreshToken, refreshTokenScheduler } from './tokenManager';
+import axios from 'axios';
+const mongoose = require('mongoose');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 app.use(bodyParser.json());
 setupSwagger(app);
-
+/*
+// Connect to MongoDB
+mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('MongoDB connected'))
+  .catch(err => console.error('MongoDB connection error:', err));
+*/
 // Set up OAuth 2.0 client using environment variables
 const oAuth2Client = new google.auth.OAuth2(
   process.env.CLIENT_ID,
@@ -26,6 +33,46 @@ const oAuth2Client = new google.auth.OAuth2(
   process.env.REDIRECT_URI_4
 );
 
+
+// Microsoft OAuth Login Route
+app.get('/auth/microsoft', (req, res) => {
+  const authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${process.env.MICROSOFT_CLIENT_ID}&response_type=code&redirect_uri=${process.env.MICROSOFT_REDIRECT_URI}&response_mode=query&scope=offline_access%20Calendars.ReadWrite%20User.Read`;
+  res.redirect(authUrl);
+});
+
+// Microsoft OAuth Callback Route
+app.get('/auth/microsoft/callback', async (req, res) => {
+  const code = req.query.code;
+  const tokenUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+
+  try {
+    const tokenResponse = await axios.post(tokenUrl, null, {
+      params: {
+        client_id: process.env.MICROSOFT_CLIENT_ID,
+        scope: 'offline_access Calendars.ReadWrite User.Read',
+        code,
+        redirect_uri: process.env.MICROSOFT_REDIRECT_URI,
+        grant_type: 'authorization_code',
+        client_secret: process.env.MICROSOFT_CLIENT_SECRET,
+      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+
+    const tokens = tokenResponse.data;
+    fs.writeFileSync(path.join(__dirname, '..', 'microsoft_token.json'), JSON.stringify(tokens));
+
+    res.send('Microsoft Authentication Successful. You can close this tab.');
+  } catch (error) {
+    console.error('Error during Microsoft OAuth callback:', error);
+    res.status(500).send('Authentication with Microsoft failed.');
+  }
+});
+/*
+async function getUserEmail() {
+  const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
+  const response = await oauth2.userinfo.get();
+  return response.data.email;
+}*/
 // Example of reading the token
 const tokenPath = path.join(__dirname, '..', 'token.json');
 

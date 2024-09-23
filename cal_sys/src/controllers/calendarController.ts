@@ -6,6 +6,7 @@ import { calendar_v3, google } from 'googleapis';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { calculateDuration, calculateDurations } from '../utils/utils'; // Correct relative path
+import { Client } from '@microsoft/microsoft-graph-client';
 
 let isSyncBoolean: boolean = false;
 let oldSyncBoolean: boolean = false;
@@ -884,5 +885,103 @@ export const deleteEvent = async (req: Request, res: Response) => {
       error:
         error instanceof Error ? error.message : 'An unknown error occurred'
     });
+  }
+};
+
+const microsoftTokenPath = path.join(__dirname, '..', 'microsoft_token.json');
+
+// Sync Microsoft Calendar Events with Amura
+export const syncMicrosoftCalendarEvents = async (req: Request, res: Response) => {
+  try {
+    const tokens = JSON.parse(fs.readFileSync(microsoftTokenPath, 'utf-8'));
+    const accessToken = tokens.access_token;
+
+    // Get Microsoft Calendar events
+    const response = await axios.get('https://graph.microsoft.com/v1.0/me/events', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    const events = response.data.value;
+    const userId = fs.readFileSync(path.join(__dirname, '..', 'email.txt'), 'utf-8');
+
+    // Sync each event to Amura
+    for (const event of events) {
+      const startDateTime = event.start.dateTime;
+      const endDateTime = event.end.dateTime;
+
+      const eventData = {
+        userId,
+        organizer: 'Microsoft Calendar',
+        title: event.subject || 'No Title',
+        eventType: 'events',
+        timeZone: event.start.timeZone || 'UTC',
+        tenantName: 'amura',
+        eventDate: startDateTime,
+        fromTime: startDateTime,
+        toDate: endDateTime,
+        toTime: endDateTime,
+        duration: calculateDuration(startDateTime, endDateTime),
+        repeatType: 'doesntRepeat',
+        tenantId: 'amura',
+        notify: [],
+        tenantParticipants: [],
+        externalParticipants: event.attendees?.map((attendee: any) => attendee.emailAddress.address) || [],
+        isExcludeMeFromEvent: false,
+        visibility: event.sensitivity || 'private',
+        status: event.isCancelled ? 'cancelled' : 'confirmed',
+        callType: 'video',
+        others: '',
+        description: event.bodyPreview || '',
+        notifyTimeInMinutes: [10]
+      };
+
+      // Send the event data to Amura
+      try {
+        await axios.post(`${baseURL}/scheduler/event/createEvent`, eventData, {
+          headers: {
+            Authorization: `Bearer ${customApiToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log(`Microsoft Event "${eventData.title}" synced successfully.`);
+      } catch (postError) {
+        console.error(`Failed to sync Microsoft event "${eventData.title}":`, postError);
+      }
+    }
+
+    res.send('Microsoft Calendar events synced successfully!');
+  } catch (error) {
+    console.error('Error syncing Microsoft events:', error);
+    res.status(500).send('Error syncing Microsoft calendar events.');
+  }}
+
+// Function to create an event
+export const createMicrosoftEvent = async (req: Request, res: Response) => {
+  const { title, startTime, endTime, attendees } = req.body;
+
+  try {
+      const client = Client.initWithMiddleware({ authProvider });
+
+      const event = {
+          subject: title,
+          start: {
+              dateTime: startTime,
+              timeZone: 'UTC', // Adjust as needed
+          },
+          end: {
+              dateTime: endTime,
+              timeZone: 'UTC',
+          },
+          attendees: attendees.map(email => ({
+              emailAddress: { address: email },
+              type: 'required',
+          })),
+      };
+
+      const createdEvent = await client.api('/me/events').post(event);
+      res.status(201).json(createdEvent);
+  } catch (error) {
+      console.error('Error creating event:', error);
+      res.status(500).json({ error: error.message });
   }
 };

@@ -6,9 +6,8 @@ import {
   getEvents, 
   watchGoogleCalendar, 
   handleCalendarWebhook, 
-  syncOldGoogleCalendarEvents 
+  syncOldGoogleCalendarEvents ,syncMicrosoftCalendarEvents
 } from '../controllers/calendarController';
-
 const router = Router();
 /**
  * @swagger
@@ -165,5 +164,6 @@ router.get('/watch', watchGoogleCalendar);
  *         description: Old events synchronized successfully
  */
 router.get('/sync', syncOldGoogleCalendarEvents);
+router.get('/microsoft-sync', syncMicrosoftCalendarEvents);
 
 export default router;
