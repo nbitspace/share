@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { calculateDuration, calculateDurations } from '../utils/utils'; // Correct relative path
 import { Client } from '@microsoft/microsoft-graph-client';
 
+
 let isSyncBoolean: boolean = false;
 let oldSyncBoolean: boolean = false;
 // Load OAuth 2.0 credentials
@@ -45,6 +46,15 @@ async function authenticate() {
     throw new Error('Token not found. Please authenticate via /auth');
   }
 }
+// Updated authenticate function to accept token from config
+async function authenticateTokenfromDb(token: string) {
+  if (token) {
+    oAuth2Client.setCredentials({ refresh_token: token });
+  } else {
+    throw new Error('Token not found. Please provide a valid token.');
+  }
+}
+
 
 // Watch for changes in Google Calendar
 export const watchGoogleCalendar = async (req: Request, res: Response) => {
@@ -113,7 +123,7 @@ export const processWebhookEvent = async (req: Request, res: Response) => {
     console.log('Webhook body:', req.body);
 
     // Fetch the authenticated user's email
-    const userEmail = 'nbitspace01@gmail.com'; // await getAuthenticatedUserEmail();
+    const userEmail = 'nbitspace01@gmail.com';  //await getAuthenticatedUserEmail();
 
     // Fetch the full event details from Google Calendar using the event ID
     const eventDetails = await getEventDetails(event_id);
@@ -608,7 +618,59 @@ export const createEvent = async (req: Request, res: Response) => {
         error instanceof Error ? error.message : 'An unknown error occurred'
     });
   }
+};interface CreateGoogleEventData {
+  title: string;
+  description?: string;
+  fromTime: string;
+  toTime: string;
+  timeZone: string;
+  externalParticipants: string[];
+  notifyTimeInMinutes: number[];
+}
+
+export const createGoogleEvent = async (data: CreateGoogleEventData, token: string) => {
+  try {
+    // Use the token from CalSyncConfig
+    await authenticateTokenfromDb(token);
+
+    // Map the time zone before creating the event
+    const timeZone = mapTimeZone(data.timeZone);
+
+    const event = {
+      summary: data.title,
+      description: data.description || '',
+      start: {
+        dateTime: data.fromTime,
+        timeZone: timeZone // Use the mapped time zone here
+      },
+      end: {
+        dateTime: data.toTime,
+        timeZone: timeZone // Use the mapped time zone here
+      },
+      attendees: data.externalParticipants.map((email: string) => ({ email })),
+      reminders: {
+        useDefault: false,
+        overrides: data.notifyTimeInMinutes.map((minutes: number) => ({
+          method: 'popup',
+          minutes
+        }))
+      }
+    };
+
+    // Create event in Google Calendar
+    const googleResponse = await calendar.events.insert({
+      calendarId: 'primary',
+      requestBody: event
+    });
+    
+    console.log('Event created successfully:', googleResponse.data);
+    return googleResponse.data;
+  } catch (error) {
+    console.error('Error creating event:', error);
+    throw new Error(error instanceof Error ? error.message : 'An unknown error occurred');
+  }
 };
+
 
 // Update an event
 /**
@@ -887,6 +949,290 @@ export const deleteEvent = async (req: Request, res: Response) => {
     });
   }
 };
+// Dummy data for the response
+const dummyAmuraResponse = {
+  metaData: { totalItems: 10 },
+  events: [
+    {
+      platform: 'GOOGLE',
+      title: 'Google Meeting',
+      description: 'Google Calendar Event Description',
+      fromTime: '2024-08-29T09:00:00.000Z',
+      toTime: '2024-08-29T10:00:00.000Z',
+      externalParticipants: ['email1@example.com'],
+      timeZone: 'America/New_York',
+      notifyTimeInMinutes: [30],
+    },
+    {
+      platform: 'MICROSOFT',
+      title: 'Microsoft Meeting',
+      description: 'Microsoft Calendar Event Description',
+      fromTime: '2024-08-30T11:00:00.000Z',
+      toTime: '2024-08-30T12:00:00.000Z',
+      externalParticipants: ['email2@example.com'],
+      timeZone: 'America/Los_Angeles',
+      notifyTimeInMinutes: [15],
+    },
+  ],
+};
+
+// Function to process Amura events and create calendar events
+export const processAmuraEvents = async (req: Request, res: Response) => {
+  try {
+    // Iterate over the list of events from the Amura response
+    for (const event of dummyAmuraResponse.events) {
+      // Prepare the request body for creating an event
+      const requestBody = {
+        title: event.title,
+        description: event.description,
+        fromTime: event.fromTime,
+        toTime: event.toTime,
+        externalParticipants: event.externalParticipants,
+        timeZone: event.timeZone,
+        notifyTimeInMinutes: event.notifyTimeInMinutes,
+      };
+
+      // Check if the platform is Google and call the createEvent function
+      if (event.platform === 'GOOGLE') {
+        const createdEvent = await createEvent({ body: requestBody } as Request, res);
+        console.log('Created Google Calendar event:', createdEvent);
+      }
+      // Handle Microsoft events if needed
+      else if (event.platform === 'MICROSOFT') {
+       await createMicrosoftCalendarEvent(event);
+      }
+    }
+
+    res.status(200).send('All relevant events processed and posted to calendars');
+  } catch (error) {
+    console.error('Error processing Amura events:', error);
+    res.status(500).send('Failed to process Amura events');
+  }
+};
+
+// Dummy function to create event in Microsoft Calendar (placeholder)
+const createMicrosoftCalendarEvent = async (event: any) => {
+  console.log('Creating event in Microsoft Calendar with data:', event);
+  // Logic to post event to Microsoft Calendar API
+};
+// Dummy data for CalSyncConfig table
+const calSyncConfigs = [
+  {
+    id: 1,
+    pms_cal_id: "amura-calendar-1",
+    email: 'vaishanth001@gmail.com',
+    cal_type: 'google',
+    token_type: 'OAuth',
+    api_key: 'some-google-refresh-token',
+    temp_api_key: null, // Access Token (optional)
+    expiry_time_key: null, // Token expiry time (optional)
+    is_sync_enabled: true,
+    last_sync_time: "2024-08-29T16:30:00.000Z"
+  },
+  {
+    id: 2,
+    pms_cal_id: "amura-calendar-2",
+    email: 'vaishanth7585@gmail.com',
+    cal_type: 'microsoft',
+    token_type: 'OAuth',
+    api_key: 'some-microsoft-api-key',
+    temp_api_key: null, // Access Token (optional)
+    expiry_time_key: null, // Token expiry time (optional)
+    is_sync_enabled: true,
+    last_sync_time: "2024-08-30T16:30:00.000Z"
+  }
+];
+
+const searchResponse = {
+  Status: "Success",
+  Message: "Elastic search response",
+  "body": [
+    {
+        "_index": "calendar_events",
+        "_id": "fd7d24aa-d305-4bb5-8f0c-8857ee2dc5d7",
+        "_score": 0,
+        "_source": {
+            "userId": "3220a87b-e81d-451f-ae59-a10b991ebe60",
+            "organizer": "3220a87b-e81d-451f-ae59-a10b991ebe60",
+            "title": "second event",
+            "eventType": "events",
+            "tenantName": "amura",
+            "eventDate": "2024-08-30T16:30:00.000Z",
+            "fromTime": "2024-08-30T16:30:00.000Z",
+            "toDate": "2024-08-30T17:00:00.000Z",
+            "toTime": "2024-08-30T17:00:00.000Z",
+            "duration": 30,
+            "timeZone": "indianStandardTime",
+            "repeatType": "doesntRepeat",
+            "reccurance": {},
+            "tenantId": "amura",
+            "notify": [
+                "10 minutes before"
+            ],
+            "tenantParticipants": [
+                {
+                    "userId": "3220a87b-e81d-451f-ae59-a10b991ebe60",
+                    "roleId": "L1 - Treating Doctor"
+                }
+            ],
+            "externalParticipants": [],
+            "isExcludeMeFromEvent": false,
+            "visibility": "public",
+            "status": "busy",
+            "callType": "video",
+            "others": "",
+            "description": "",
+            "permissons": [
+                "None"
+            ],
+            "organizerRoleId": "L1 - Treating Doctor",
+            "notifyTimeInMinutes": [
+                10
+            ],
+            "createdOn": "2024-08-30T14:00:36.837Z",
+            "parentId": "afb3a7fb-ab69-47dc-969b-79466f680d22",
+            "eventId": "fd7d24aa-d305-4bb5-8f0c-8857ee2dc5d7",
+            "updatedBy": "3220a87b-e81d-451f-ae59-a10b991ebe60",
+            "rsvp": {},
+            "acceptedParticipants": [],
+            "notifyTimeStrings": [
+                "2024-08-30T16:20:00.000Z"
+            ]
+        }
+    },
+    {
+        "_index": "calendar_events",
+        "_id": "6a51b78b-6181-4c75-908a-ee26dcb3249a",
+        "_score": 0,
+        "_source": {
+            "eventId": "6a51b78b-6181-4c75-908a-ee26dcb3249a",
+            "parentId": "c6382771-4fcc-4a5b-9bb3-954f29442a19",
+            "organizer": "3220a87b-e81d-451f-ae59-a10b991ebe60",
+            "title": "new event update",
+            "eventType": "events",
+            "tenantName": "amura",
+            "eventDate": "2024-08-30T15:00:00.000Z",
+            "fromTime": "2024-08-30T15:00:00.000Z",
+            "toDate": "2024-08-30T15:30:00.000Z",
+            "toTime": "2024-08-30T15:30:00.000Z",
+            "duration": 30,
+            "timeZone": "indianStandardTime",
+            "repeatType": "doesntRepeat",
+            "reccurance": {},
+            "tenantId": "amura",
+            "notify": [
+                "10 minutes before"
+            ],
+            "tenantParticipants": [
+                {
+                    "userId": "3220a87b-e81d-451f-ae59-a10b991ebe60",
+                    "roleId": "L1 - Treating Doctor"
+                }
+            ],
+            "externalParticipants": [],
+            "isExcludeMeFromEvent": false,
+            "callType": "video",
+            "description": "",
+            "others": "",
+            "visibility": "public",
+            "status": "busy",
+            "permissons": [
+                "None"
+            ],
+            "organizerRoleId": "L1 - Treating Doctor",
+            "action": {
+                "thisEvent": true,
+                "allEvents": false,
+                "value": "update"
+            },
+            "notifyTimeInMinutes": [
+                10
+            ],
+            "updatedBy": "823c0916-9e9d-4a9c-813f-ad2c09eac38b",
+            "acceptedParticipants": [],
+            "rsvp": {},
+            "notifyTimeStrings": [
+                "2024-08-30T14:50:00.000Z"
+            ]
+        }
+    }
+]
+};
+
+const getCalSyncConfigById = (id: number) => {
+  return calSyncConfigs.find(config => config.id === id);
+};
+
+
+
+
+const mapElasticSearchDataToGoogleEvent = (eventData: any) => {
+  const { title, fromTime, toTime, timeZone, externalParticipants, notifyTimeInMinutes } = eventData._source;
+
+  return {
+    summary: title,
+    start: {
+      dateTime: fromTime,
+      timeZone: timeZone
+    },
+    end: {
+      dateTime: toTime,
+      timeZone: timeZone
+    },
+    attendees: externalParticipants.map((participant: any) => ({ email: participant.email })),
+    reminders: {
+      useDefault: false,
+      overrides: notifyTimeInMinutes.map((minutes: number) => ({
+        method: "popup",
+        minutes
+      }))
+    }
+  };
+};
+
+export const syncEventsForCalSyncConfig = async (configId: number) => {
+  // Fetch the calendar sync config by ID
+  const config = getCalSyncConfigById(configId);
+  
+  if (!config || !config.is_sync_enabled) {
+    console.log("Sync is disabled for this calendar configuration.");
+    return;
+  }
+
+  // Iterate over Elastic Search event data and map to Google events
+  searchResponse.body.forEach(async (eventData) => {
+    const eventToCreate = mapElasticSearchDataToGoogleEvent(eventData);
+
+    // Define the request data structure as expected by createGoogleEvent
+    const reqData: CreateGoogleEventData = {
+      title: eventToCreate.summary,
+      fromTime: eventToCreate.start.dateTime,
+      toTime: eventToCreate.end.dateTime,
+      timeZone: eventToCreate.start.timeZone,
+      externalParticipants: [], // Map participants if needed
+      notifyTimeInMinutes: eventToCreate.reminders.overrides.map((override: { method: string, minutes: number }) => override.minutes)
+    };
+
+    console.log("Creating event:", reqData);
+
+    // Call createGoogleEvent with reqData and API key
+    await createGoogleEvent(reqData, config.api_key);
+  });
+};
+
+
+
+
+// Hypothetical placeholder for Microsoft event creation method
+async function createMicrosoftCalendarEvents(req: Request, res: Response) {
+  // Microsoft Calendar API integration logic goes here
+  // This is a placeholder function, you would need to implement the Microsoft-specific API calls.
+  console.log('Creating event in Microsoft Calendar...');
+}
+
+/*
+
+
 
 const microsoftTokenPath = path.join(__dirname, '..', 'microsoft_token.json');
 
@@ -985,3 +1331,5 @@ export const createMicrosoftEvent = async (req: Request, res: Response) => {
       res.status(500).json({ error: error.message });
   }
 };
+
+*/
