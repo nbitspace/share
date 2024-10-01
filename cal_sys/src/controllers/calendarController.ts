@@ -46,14 +46,37 @@ async function authenticate() {
     throw new Error('Token not found. Please authenticate via /auth');
   }
 }
-// Updated authenticate function to accept token from config
 async function authenticateTokenfromDb(token: string) {
-  if (token) {
+  console.log("authenticateTokenfromDb method : " + token);
+  
+  try {
+    // Set credentials to use refresh token
     oAuth2Client.setCredentials({ refresh_token: token });
-  } else {
-    throw new Error('Token not found. Please provide a valid token.');
+
+    await oAuth2Client.getAccessToken().then(token => {
+      console.log("New access token: " + token.token);
+    });
+    
+    // Try refreshing the access token
+    const { credentials } = await oAuth2Client.refreshAccessToken();
+    
+    if (credentials.access_token) {
+      oAuth2Client.setCredentials(credentials);  // Set the new access token
+      console.log("Access token refreshed successfully.");
+    } else {
+      throw new Error("Failed to refresh access token.");
+    }
+  } catch (error) {
+    if (error && error === "invalid_grant") {
+      // Handle token expiration or revocation
+      console.error("The provided token is either expired or revoked. Please reauthenticate.");
+    } else {
+      console.error("Error refreshing token:", error);
+    }
+    throw error;
   }
 }
+
 
 
 // Watch for changes in Google Calendar
@@ -632,7 +655,7 @@ export const createGoogleEvent = async (data: CreateGoogleEventData, token: stri
   try {
     // Use the token from CalSyncConfig
     await authenticateTokenfromDb(token);
-
+console.log("authenticateTokenfromDb"+authenticateTokenfromDb+"token")
     // Map the time zone before creating the event
     const timeZone = mapTimeZone(data.timeZone);
 
@@ -1023,7 +1046,7 @@ const calSyncConfigs = [
     email: 'vaishanth001@gmail.com',
     cal_type: 'google',
     token_type: 'OAuth',
-    api_key: 'some-google-refresh-token',
+    api_key: 'ya29.a0AcM612winR5qNJWMCTplrcYK4m1xKp-lXA0zkL-qvJbXvD4W6YZVH1Wxkbjd0TY8-D0rLVbOkWoq_n2C9spgP-NqayH75xj4AlYlRhJkSA5CNupfpU6LYTpRhtzDPtx_5bnDJIrZW8xgci0Q6WISgkJRgR87cTn5rloaCgYKAa4SARASFQHGX2MikemPO2bYtkG3Nvpebkwjhg0170',
     temp_api_key: null, // Access Token (optional)
     expiry_time_key: null, // Token expiry time (optional)
     is_sync_enabled: true,
@@ -1035,7 +1058,7 @@ const calSyncConfigs = [
     email: 'vaishanth7585@gmail.com',
     cal_type: 'microsoft',
     token_type: 'OAuth',
-    api_key: 'some-microsoft-api-key',
+    api_key: 'ya29.a0AcM612winR5qNJWMCTplrcYK4m1xKp-lXA0zkL-qvJbXvD4W6YZVH1Wxkbjd0TY8-D0rLVbOkWoq_n2C9spgP-NqayH75xj4AlYlRhJkSA5CNupfpU6LYTpRhtzDPtx_5bnDJIrZW8xgci0Q6WISgkJRgR87cTn5rloaCgYKAa4SARASFQHGX2MikemPO2bYtkG3Nvpebkwjhg0170',
     temp_api_key: null, // Access Token (optional)
     expiry_time_key: null, // Token expiry time (optional)
     is_sync_enabled: true,
@@ -1192,7 +1215,9 @@ const mapElasticSearchDataToGoogleEvent = (eventData: any) => {
 
 export const syncEventsForCalSyncConfig = async (configId: number) => {
   // Fetch the calendar sync config by ID
-  const config = getCalSyncConfigById(configId);
+  const id = 1;
+  console.log("configId"+configId)
+  const config = getCalSyncConfigById(id);
   
   if (!config || !config.is_sync_enabled) {
     console.log("Sync is disabled for this calendar configuration.");
@@ -1230,7 +1255,56 @@ async function createMicrosoftCalendarEvents(req: Request, res: Response) {
   console.log('Creating event in Microsoft Calendar...');
 }
 
+
+
 /*
+const syncEventsForCalSyncConfigOrg = async (config: CalendarSyncConfig, esResponse: any) => {
+  try {
+      // Process each event from the ElasticSearch response
+      await Promise.all(esResponse.body.map(async (eventData) => {
+          const eventToSync = mapElasticSearchDataToGoogleEventOrg(eventData);
+          const requestData = {
+              title: eventToSync.summary,
+              fromTime: eventToSync.start.dateTime,
+              toTime: eventToSync.end.dateTime,
+              timeZone: eventToSync.start.timeZone,
+              externalParticipants: [], // Sync participants if needed
+              notifyTimeInMinutes: eventToSync.reminders.overrides.map(override => override.minutes)
+          };
+
+          console.log("Syncing event:", requestData);
+
+          // Call external API to sync event (e.g., Google Calendar API)
+          await createGoogleEvent(requestData, config.api_key);
+      }));
+  } catch (error) {
+      throw new Error("Event sync failed: " + error);
+  }
+};
+
+
+// Example mapping function (adjust as per your needs)
+const mapElasticSearchDataToGoogleEventOrg = (esEventData) => {
+  return {
+      summary: esEventData._source.title,
+      start: {
+          dateTime: esEventData._source.fromTime,
+          timeZone: esEventData._source.timeZone
+      },
+      end: {
+          dateTime: esEventData._source.toTime,
+          timeZone: esEventData._source.timeZone
+      },
+      reminders: {
+          useDefault: false,
+          overrides: esEventData._source.notifyTimeInMinutes.map(minuteVal => ({
+              method: 'popup',
+              minutes: minuteVal
+          }))
+      }
+  };
+};
+
 
 
 

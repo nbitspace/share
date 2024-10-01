@@ -104,19 +104,49 @@ app.get('/auth', (req, res) => {
       const oauth2 = google.oauth2({ auth: oAuth2Client, version: 'v2' });
       const userInfo = await oauth2.userinfo.get();
 
-      // Optionally, save the user's email for later use
       const email = userInfo.data.email || 'unknown';
+      const calendarData = {
+        userId: 1,  // Assume this is auto-increment or pulled from your session, etc.
+        pms_cal_id: 'Google', 
+        email: email,
+        cal_type: 'Google Calendar',
+        token_type: tokens.token_type,
+        api_key: tokens.access_token,
+        temp_api_key: tokens.refresh_token,
+        expiry_time_key: tokens.expiry_date,
+        is_sync_enabled: true,
+        last_sync_time: new Date().toISOString() 
+      };
+  
+      // Save tokens to a file (optional for persistence)
+      fs.writeFileSync(path.join(__dirname, '..', 'token.json'), JSON.stringify(tokens));
+      fs.writeFileSync(path.join(__dirname, '..', 'email.txt'), email);
+  
+      // Make a POST request to save the calendar sync settings
+      const response = await axios.post(
+        'http://localhost:8080/scheduler/event/syncSettings', // Update this to your actual endpoint if needed
+        calendarData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      // Optionally, save the user's email for later use
       fs.writeFileSync(path.join(__dirname, '..', 'email.txt'), email);
 
       res.send('Authentication successful! You can close this tab.');
-    } catch (error) {
-      console.error('Error during OAuth callback:', error);
-      res.status(500).send('Authentication failed.');
+     if (response.status === 200) {
+      res.send('Authentication successful and calendar sync settings saved! You can close this tab.');
+    } else {
+      res.status(response.status).send('Failed to save calendar sync settings.');
     }
-  } else {
-    res.status(400).send('No code found in query parameters');
+
+  } catch (error) {
+    console.error('Error during OAuth callback:', error);
+    res.status(500).send('Authentication failed.');
   }
-});
+}});
 
 
 /**
