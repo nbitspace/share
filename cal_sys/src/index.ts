@@ -10,17 +10,19 @@ import { simpleParser } from 'mailparser';
 import nodemailer from 'nodemailer';
 import calendarRouter from './routes/calendarRoutes';
 import { setupSwagger } from './swaggerConfig';
-import { watchGoogleCalendar, syncOldGoogleCalendarEvents, processWebhookEvent, createEvent, getEvents ,syncEventsForCalSyncConfig} from './controllers/calendarController';
+import { watchGoogleCalendar, syncOldGoogleCalendarEvents, processWebhookEvent, createEvent, getEvents ,syncEventsForCalSyncConfig,} from './controllers/calendarController';
 import { checkAndRefreshToken, refreshTokenScheduler } from './tokenManager';
 import axios from 'axios';
+//import handleLambdaEvents from './handleLambdaEvents'
+import { handleLambdaEvents } from "./handleLambdaEvents"
 // const mongoose = require('mongoose');
+
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 app.use(bodyParser.json());
 setupSwagger(app);
-
 const oAuth2Client = new google.auth.OAuth2(
   process.env.CLIENT_ID,
   process.env.CLIENT_SECRET,
@@ -85,6 +87,7 @@ app.get('/auth', (req, res) => {
  *         description: Authentication failed
  */app.get('/', async (req, res) => {
   const code = req.query.code as string | undefined;
+
   if (code) {
     try {
       const { tokens } = await oAuth2Client.getToken(code);
@@ -92,13 +95,7 @@ app.get('/auth', (req, res) => {
 
       // Save tokens to a file
       fs.writeFileSync(path.join(__dirname, '..', 'token.json'), JSON.stringify(tokens));
-
-      // Set the OAuth 2.0 client credentials
-      oAuth2Client.setCredentials({
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        expiry_date: tokens.expiry_date,
-      });
+      //fs.writeFileSync(path.join(__dirname, '..', 'email.txt'), tokens.access_token);
 
       // Fetch the user's profile
       const oauth2 = google.oauth2({ auth: oAuth2Client, version: 'v2' });
@@ -106,47 +103,44 @@ app.get('/auth', (req, res) => {
 
       const email = userInfo.data.email || 'unknown';
       const calendarData = {
-        userId: 1,  // Assume this is auto-increment or pulled from your session, etc.
-        pms_cal_id: 'Google', 
+        userId: "3220a87b-e81d-451f-ae59-a10b991ebe60",
+        pms_cal_id: 'amura-calendar-1',
         email: email,
         cal_type: 'Google Calendar',
-        token_type: tokens.token_type,
+        token_type: "OAuth2",
         api_key: tokens.access_token,
         temp_api_key: tokens.refresh_token,
         expiry_time_key: tokens.expiry_date,
         is_sync_enabled: true,
-        last_sync_time: new Date().toISOString() 
+        last_sync_time: new Date().toISOString(),
       };
-  
-      // Save tokens to a file (optional for persistence)
-      fs.writeFileSync(path.join(__dirname, '..', 'token.json'), JSON.stringify(tokens));
-      fs.writeFileSync(path.join(__dirname, '..', 'email.txt'), email);
-  
+
       // Make a POST request to save the calendar sync settings
       const response = await axios.post(
-        'http://localhost:8080/scheduler/event/syncSettings', // Update this to your actual endpoint if needed
+        'http://localhost:3000/scheduler/event/syncSettings',
         calendarData,
         {
           headers: {
-            'Content-Type': 'application/json'
-          }
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.CUSTOM_API_TOKEN}`,
+          },
         }
-      )
-      // Optionally, save the user's email for later use
-      fs.writeFileSync(path.join(__dirname, '..', 'email.txt'), email);
+      );
 
-      res.send('Authentication successful! You can close this tab.');
-     if (response.status === 200) {
-      res.send('Authentication successful and calendar sync settings saved! You can close this tab.');
-    } else {
-      res.status(response.status).send('Failed to save calendar sync settings.');
+      // Send response based on the result of the POST request
+      if (response.status === 200) {
+        res.send('Authentication successful and calendar sync settings saved! You can close this tab.');
+      } else {
+        res.status(response.status).send('Failed to save calendar sync settings.');
+      }
+    } catch (error) {
+      console.error('Error during OAuth callback:', error);
+      res.status(500).send('Authentication failed.');
     }
-
-  } catch (error) {
-    console.error('Error during OAuth callback:', error);
-    res.status(500).send('Authentication failed.');
+  } else {
+    res.status(400).send('Code not found in query parameters');
   }
-}});
+});
 
 
 /**
@@ -212,6 +206,7 @@ app.post('/webhook', processWebhookEvent);
 app.use('/calendar', calendarRouter);
 app.use('/syscal_config',syncEventsForCalSyncConfig)
 
+app.post('/calltestfunc', handleLambdaEvents);
 
 
 // Start server
