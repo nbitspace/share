@@ -11,8 +11,8 @@ interface TenantParticipant {
 interface InputEventData {
   userId: string;
   organizer: string;
-  fromTime: string; // or Date, depending on how you're sending it
-  toTime: string;   // or Date
+  fromTime: string;
+  toTime: string;   
   title: string;
   eventType: string;
   duration: number;
@@ -25,7 +25,8 @@ export const handleLambdaEvents = async (req: Request<any, any, InputEventData>,
   try {
     // Extract input data from the request body
     const inputEventData: InputEventData = req.body;
-    console.log("handleLambdaEvents : "+inputEventData.title);
+    console.log("handleLambdaEvents : "+inputEventData.tenantParticipants);
+    const tenantUserId = inputEventData.tenantParticipants[0]?.userId; // Using optional chaining to avoid errors if the array is empty
 
     // Create query payload for ElasticSearch (searchInES API)
     const esQueryPayload = {
@@ -47,17 +48,13 @@ export const handleLambdaEvents = async (req: Request<any, any, InputEventData>,
               bool: {
                 should: [
                   {
-                    bool: {
-                      must: [
-                        { match_phrase: { "tenantParticipants.userId": inputEventData.tenantParticipants.map(participant => participant.userId) } },
-                      ],
+                    match_phrase: {
+                      "tenantParticipants.userId": tenantUserId, // Use single userId
                     },
                   },
                   {
-                    bool: {
-                      must: [
-                        { match_phrase: { organizer: inputEventData.organizer } },
-                      ],
+                    match_phrase: {
+                      organizer: inputEventData.organizer,
                     },
                   },
                 ],
@@ -68,6 +65,7 @@ export const handleLambdaEvents = async (req: Request<any, any, InputEventData>,
       },
       size: 10000,
     };
+    
 
     // Call ElasticSearch API (searchInES)
     const esResponse = await axios.post('http://localhost:3000/searchInES', esQueryPayload, {
@@ -75,25 +73,29 @@ export const handleLambdaEvents = async (req: Request<any, any, InputEventData>,
         Authorization: `Bearer ${yourBearerToken}`,
       },
     });
-    console.log("handleLambdaEvents esResponse: "+esResponse);
 
     if (esResponse.data.Status !== "Success") {
       throw new Error('Failed to fetch events from ElasticSearch');
     }
+    if (esResponse.data.Status == "Success") {
+      const calendarEvents = esResponse.data.body[0];
+      console.log("calendarEvents get resp"+calendarEvents);
 
+    }
     const calendarEvents = esResponse.data.body;
 
-    // Call next function to fetch calendar sync settings using userId
+    // Fetch calendar sync settings using the userId from the event data
     const calendarSyncSettings = await getCalendarSyncSettings(inputEventData.userId);
 
-    // Call syscal_config API with the sync settings
-    const syncResponse = await syncCalendarSettings(calendarSyncSettings);
+    // Call syscal_config API with the sync settings and input event data
+    const syncResponse = await syncCalendarSettings(calendarSyncSettings, inputEventData);
+
 
     return res.status(200).json({
       Status: "Success",
       Message: "Calendar data processed",
-      calendarEvents,
-      syncResponse,
+     //  calendarEvents,
+       syncResponse,
     });
   } catch (error) {
     console.error("Error:", error);
@@ -104,17 +106,18 @@ export const handleLambdaEvents = async (req: Request<any, any, InputEventData>,
   }
 };
 
-// Helper function to get calendar sync settings by userId
+// Helper function to get calendar sync settings by userId 
 const getCalendarSyncSettings = async (userId: string) => {
   try {
-    const response = await axios.get(`http://localhost:3000/scheduler/event/getCalendarSyncSettings?userId=${userId}`, {
+    const response = await axios.get(`http://localhost:3000/scheduler/event/getSyncSettings/${userId}`, {
       headers: {
-        Authorization: `Bearer ${yourBearerToken}`,
-      },
+        Authorization: `Bearer ${yourBearerToken}`, // Replace with your actual token
+      }
     });
-
-    if (response.status === 200) {
-      return response.data;
+    
+    // Ensure response is an array before returning
+    if (response.status === 200 && Array.isArray(response.data)) {
+      return response.data;  // Return the array of sync settings
     } else {
       throw new Error('Failed to fetch calendar sync settings');
     }
@@ -123,14 +126,20 @@ const getCalendarSyncSettings = async (userId: string) => {
     throw error;
   }
 };
-
 // Helper function to call syscal_config API
-const syncCalendarSettings = async (syncSettings: any) => {
+const syncCalendarSettings = async (syncSettings: any[], inputEventData: any) => {
   try {
-    const response = await axios.post('http://localhost:8080/syscal_config', syncSettings);
+    // Prepare payload with the array of sync settings and event data
+    const payload = {
+      configs: syncSettings, // Array of sync settings
+      inputEventData, // Event data to sync
+    };
+
+    // Call the API to sync the settings
+    const response = await axios.post('http://localhost:8080/syscal_config', payload);
 
     if (response.status === 200) {
-      return response.data;
+      return response.data;  // Return the sync response data
     } else {
       throw new Error('Failed to sync calendar settings');
     }

@@ -46,38 +46,6 @@ async function authenticate() {
     throw new Error('Token not found. Please authenticate via /auth');
   }
 }
-async function authenticateTokenfromDb(token: string) {
-  console.log("authenticateTokenfromDb method : " + token);
-  
-  try {
-    // Set credentials to use refresh token
-    oAuth2Client.setCredentials({ refresh_token: token });
-
-    await oAuth2Client.getAccessToken().then(token => {
-      console.log("New access token: " + token.token);
-    });
-    
-    // Try refreshing the access token
-    const { credentials } = await oAuth2Client.refreshAccessToken();
-    
-    if (credentials.access_token) {
-      oAuth2Client.setCredentials(credentials);  // Set the new access token
-      console.log("Access token refreshed successfully.");
-    } else {
-      throw new Error("Failed to refresh access token.");
-    }
-  } catch (error) {
-    if (error && error === "invalid_grant") {
-      // Handle token expiration or revocation
-      console.error("The provided token is either expired or revoked. Please reauthenticate.");
-    } else {
-      console.error("Error refreshing token:", error);
-    }
-    throw error;
-  }
-}
-
-
 
 // Watch for changes in Google Calendar
 export const watchGoogleCalendar = async (req: Request, res: Response) => {
@@ -650,50 +618,185 @@ export const createEvent = async (req: Request, res: Response) => {
   externalParticipants: string[];
   notifyTimeInMinutes: number[];
 }
-
-export const createGoogleEvent = async (data: CreateGoogleEventData, token: string) => {
+async function authenticateTokenfromDbUser(token: string) {
+  console.log("authenticateTokenfromDb method : " + token);
+  
   try {
-    // Use the token from CalSyncConfig
-    await authenticateTokenfromDb(token);
-console.log("authenticateTokenfromDb"+authenticateTokenfromDb+"token")
-    // Map the time zone before creating the event
+    // Set credentials to use refresh token for the user
+    oAuth2Client.setCredentials({ refresh_token: token });
+
+    // Get a new access token (if needed) and set it in the OAuth client
+    await oAuth2Client.getAccessToken().then(token => {
+      console.log("New access token: " + token?.token);
+    });
+    
+    // Try refreshing the access token if expired
+    const { credentials } = await oAuth2Client.refreshAccessToken();
+    
+    if (credentials.access_token) {
+      oAuth2Client.setCredentials(credentials);  // Set the new access token for the user
+      console.log("Access token refreshed successfully.");
+    } else {
+      throw new Error("Failed to refresh access token.");
+    }
+  } catch (error) {
+    if (error === "invalid_grant") {
+      // Handle token expiration or revocation
+      console.error("The provided token is either expired or revoked. Please reauthenticate.");
+    } else {
+      console.error("Error refreshing token:", error);
+    }
+    throw error;
+  }
+}
+
+
+// Function to authenticate token from the database
+async function authenticateTokenfromDb(accessToken: string, refreshToken: string) {
+  console.log("authenticateTokenfromDb method. refreshToken Token: " + refreshToken);
+
+  try {
+    // Set the access token and refresh token
+    oAuth2Client.setCredentials({
+      access_token: accessToken, // Use the provided access token
+      refresh_token: refreshToken, // Use the provided refresh token
+    });
+
+    // Try to refresh the access token
+    const refreshResponse = await oAuth2Client.refreshAccessToken();
+
+    if ('credentials' in refreshResponse) {
+      const { credentials } = refreshResponse;
+      oAuth2Client.setCredentials(credentials);
+
+      if (!credentials.access_token) {
+        throw new Error("Failed to refresh access token.");
+      }
+
+      console.log("Access token refreshed successfully.");
+    } else {
+      throw new Error("Failed to get refresh response.");
+    }
+
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("invalid_grant")) {
+      console.error("The provided token is either expired or revoked. Please reauthenticate.");
+      await reauthenticateUser(); // Call to reauthenticate and get new tokens
+    } else {
+      console.error("Error refreshing token:", error);
+    }
+    throw error;  // Rethrow the error to be handled by the caller
+  }
+}
+
+// Function to reauthenticate the user
+async function reauthenticateUser() {
+  // Generate the authorization URL for reauthentication
+  const authUrl = oAuth2Client.generateAuthUrl({
+    access_type: 'offline', // Needed to obtain a refresh token
+    scope: [
+      'https://www.googleapis.com/auth/calendar', // Existing scope for Calendar API
+      'https://www.googleapis.com/auth/userinfo.profile', // Scope for user profile info
+      'https://www.googleapis.com/auth/userinfo.email' // Scope for user email info
+    ],
+    redirect_uri: process.env.REDIRECT_URI_4 // Use your defined redirect URI
+  });
+
+  console.log("Reauthentication required. Please visit the following URL: ", authUrl);
+  // Redirect the user to the auth URL in a web application
+}
+
+export const createGoogleEvent = async (
+  data: CreateGoogleEventData, 
+  accessToken: string, 
+  refreshToken: string
+) => {
+  try {
+    console.log("createGoogleEvent Method");
+
+    // Authenticate and refresh token if necessary
+    await authenticateTokenfromDb(accessToken, refreshToken); // Pass both tokens
+
+    // Map the time zone for the event
     const timeZone = mapTimeZone(data.timeZone);
 
+    // Build the event data
     const event = {
       summary: data.title,
       description: data.description || '',
       start: {
         dateTime: data.fromTime,
-        timeZone: timeZone // Use the mapped time zone here
+        timeZone: timeZone,
       },
       end: {
         dateTime: data.toTime,
-        timeZone: timeZone // Use the mapped time zone here
+        timeZone: timeZone,
       },
       attendees: data.externalParticipants.map((email: string) => ({ email })),
       reminders: {
         useDefault: false,
         overrides: data.notifyTimeInMinutes.map((minutes: number) => ({
           method: 'popup',
-          minutes
-        }))
-      }
+          minutes,
+        })),
+      },
     };
 
-    // Create event in Google Calendar
+    // Insert the event into the authenticated user's Google Calendar
     const googleResponse = await calendar.events.insert({
-      calendarId: 'primary',
-      requestBody: event
+      calendarId: 'primary',  // Primary calendar of the authenticated user
+      requestBody: event,
+      auth: oAuth2Client,     // Pass the authenticated client (with valid access token)
     });
-    
+
     console.log('Event created successfully:', googleResponse.data);
     return googleResponse.data;
   } catch (error) {
-    console.error('Error creating event:', error);
+    console.error('Error creating Google Calendar event:', error);
     throw new Error(error instanceof Error ? error.message : 'An unknown error occurred');
   }
 };
 
+// Create event in Google Calendar
+export const createGoogleEventForUser = async (data: CreateGoogleEventData, token: string) => {
+  try {
+    await authenticateTokenfromDbUser(token); // Authenticate the token
+    const timeZone = mapTimeZone(data.timeZone); // Map time zone
+
+    const event = {
+      summary: data.title,
+      description: data.description || '',
+      start: {
+        dateTime: data.fromTime,
+        timeZone: timeZone,
+      },
+      end: {
+        dateTime: data.toTime,
+        timeZone: timeZone,
+      },
+      attendees: data.externalParticipants.map((email: string) => ({ email })),
+      reminders: {
+        useDefault: false,
+        overrides: data.notifyTimeInMinutes.map((minutes: number) => ({
+          method: 'popup',
+          minutes,
+        })),
+      },
+    };
+
+    // Insert event into Google Calendar
+    const googleResponse = await calendar.events.insert({
+      calendarId: 'primary',
+      requestBody: event,
+    });
+
+    console.log('Event created successfully:', googleResponse.data);
+    return googleResponse.data;
+  } catch (error) {
+    console.error('Error creating Google Calendar event:', error);
+    throw new Error(error instanceof Error ? error.message : 'An unknown error occurred');
+  }
+};
 
 // Update an event
 /**
@@ -1212,37 +1315,73 @@ const mapElasticSearchDataToGoogleEvent = (eventData: any) => {
     }
   };
 };
-
-export const syncEventsForCalSyncConfig = async (configId: number) => {
-  // Fetch the calendar sync config by ID
-  const id = 1;
-  console.log("configId"+configId)
-  const config = getCalSyncConfigById(id);
-  
-  if (!config || !config.is_sync_enabled) {
-    console.log("Sync is disabled for this calendar configuration.");
-    return;
+export const syncEventsForCalSyncConfig = async (req: any, res: any) => {
+  const { configs, inputEventData } = req.body;
+  console.log("syncEventsForCalSyncConfig Method: ", configs);
+  if (!configs || configs.length === 0) {
+    console.log("No configs provided or configs is empty.");
+    return res.status(400).send("No configs found.");
   }
+  
+  try {
+    for (const config of configs) {
+      console.log("Syncing events for config: ", config);
+      console.log("Event data: ", inputEventData);
 
-  // Iterate over Elastic Search event data and map to Google events
-  searchResponse.body.forEach(async (eventData) => {
-    const eventToCreate = mapElasticSearchDataToGoogleEvent(eventData);
+      // Check if sync is enabled
+      if (config.is_sync_enabled) {
+        try {
+          // API Call to fetch events
+          // Trim the "USER#" prefix if present in part_key
+            const userId = config.part_key.startsWith("USER#") ? config.part_key.split("USER#")[1] : config.part_key;
 
-    // Define the request data structure as expected by createGoogleEvent
-    const reqData: CreateGoogleEventData = {
-      title: eventToCreate.summary,
-      fromTime: eventToCreate.start.dateTime,
-      toTime: eventToCreate.end.dateTime,
-      timeZone: eventToCreate.start.timeZone,
-      externalParticipants: [], // Map participants if needed
-      notifyTimeInMinutes: eventToCreate.reminders.overrides.map((override: { method: string, minutes: number }) => override.minutes)
-    };
+            // Correct API call with the trimmed userId
+            const esResponse = await axios.get(`http://localhost:3000/events/${userId}`);
+            console.log("API response: ", esResponse.data);
 
-    console.log("Creating event:", reqData);
+          if (esResponse.data.message === "Success") {
+            const calendarEvents = esResponse.data.body;
+            console.log("Events fetched successfully: ", calendarEvents);
 
-    // Call createGoogleEvent with reqData and API key
-    await createGoogleEvent(reqData, config.api_key);
-  });
+            for (const eventData of calendarEvents) {
+              const eventToCreate = mapElasticSearchDataToGoogleEvent(eventData);
+              console.log("mapElasticSearchDataToGoogleEvent respone : ", eventToCreate);
+
+              const reqData = {
+                title: eventToCreate.summary,
+                fromTime: eventToCreate.start.dateTime,
+                toTime: eventToCreate.end.dateTime,
+                timeZone: eventToCreate.start.timeZone,
+                externalParticipants: eventToCreate.attendees.map((attendee: any) => attendee.email),
+                notifyTimeInMinutes: eventToCreate.reminders.overrides.map(
+                  (override: { method: string, minutes: number }) => override.minutes
+                ),
+              };
+
+              // Sync events based on calendar type
+              if (config.cal_type === "google") {
+                console.log('Call Google event create:', reqData);
+                await createGoogleEvent(reqData, config.api_key ,config.temp_api_key);
+              } else if (config.cal_type === "Microsoft Calendar") {
+                console.log('Creating event in Microsoft Calendar...');
+                // await createMicrosoftCalendarEvents(reqData, config.api_key);
+                console.log('Microsoft event created:', reqData);
+              }
+            }
+          } else {
+            console.error("Failed to fetch events. Response: ", esResponse.data);
+          }
+        } catch (apiError) {
+          console.error("Error fetching events: ", apiError);
+        }
+      } else {
+        console.log(`Sync is disabled for config ID: ${config.id}`);
+      }
+    }
+  } catch (error) {
+    console.error('Error syncing events:', error);
+    throw error;
+  }
 };
 
 
@@ -1255,7 +1394,23 @@ async function createMicrosoftCalendarEvents(req: Request, res: Response) {
   console.log('Creating event in Microsoft Calendar...');
 }
 
+// Mock reauthenticateUser function to refresh access token using refresh token
+async function reauthenticateUserOld(refreshToken: string) {
+  try {
+    // Set the refresh token to oAuth2Client
+    oAuth2Client.setCredentials({ refresh_token: refreshToken });
 
+    // If the token is expired, refresh the token
+    const newTokens = await oAuth2Client.refreshAccessToken();
+    oAuth2Client.setCredentials(newTokens.credentials); // Set the new credentials
+
+    console.log("Reauthenticated user and obtained new access token.");
+    return newTokens.credentials;
+  } catch (error) {
+    console.error("Failed to reauthenticate user: ", error);
+    throw new Error("Failed to refresh access token.");
+  }
+}
 
 /*
 const syncEventsForCalSyncConfigOrg = async (config: CalendarSyncConfig, esResponse: any) => {
