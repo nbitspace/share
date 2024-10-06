@@ -1,5 +1,5 @@
 const axios = require('axios');
-const yourBearerToken ="eyJraWQiOiJZUU5JbzV0WnQ3UFZBbnRwNTZWYUhoVVJBSzJmOGlcL1FPbktvQTk4XC9wYzg9IiwiYWxnIjoiUlMyNTYifQ.eyJzdWIiOiI4MjNjMDkxNi05ZTlkLTRhOWMtODEzZi1hZDJjMDllYWMzOGIiLCJ6b25laW5mbyI6InRydWUiLCJlbWFpbF92ZXJpZmllZCI6ZmFsc2UsImlzcyI6Imh0dHBzOlwvXC9jb2duaXRvLWlkcC5hcC1zb3V0aC0xLmFtYXpvbmF3cy5jb21cL2FwLXNvdXRoLTFfZlhtWWxiZFlKIiwicGhvbmVfbnVtYmVyX3ZlcmlmaWVkIjp0cnVlLCJjb2duaXRvOnVzZXJuYW1lIjoiODIzYzA5MTYtOWU5ZC00YTljLTgxM2YtYWQyYzA5ZWFjMzhiIiwiZ2l2ZW5fbmFtZSI6Illhc2h3YW50aCIsImF1ZCI6IjV2ZTh1Z3ZtMTFkM2U2YWoxZWtobWpkbW04IiwiZXZlbnRfaWQiOiJlMTJiNzcxYS1iYTA0LTQwYWItYjU0OC1mNGZjMjEyZDk1YmEiLCJ0b2tlbl91c2UiOiJpZCIsImF1dGhfdGltZSI6MTcyNTAwMTEzNiwicGhvbmVfbnVtYmVyIjoiKzkxMTExMDAwNDQxMCIsImV4cCI6MTcyNTA4NzUzNiwiaWF0IjoxNzI1MDAxMTM2LCJmYW1pbHlfbmFtZSI6IkdDLTQiLCJlbWFpbCI6InRlc3RAZ21haWwuY29tIn0.skQdAIUOclu5_NexfyfjtrmKxc0gltNN5TZdZFjPiDQFi7LQoBtf6qnTX-3pJz9ClIkoukqsd1T7GssukEBkgt9HL9T9r0EtuGwicSb3-MV28_cqbOKlov_dycAHFHNhVUZWs_xpqdd9AM-i9SApj236cSmOA3reDo2mehy94gIMZGahEaKGx2ynSXcv_G3MXB0yw-UQjCHz1dF0Q0BsEeV0b-hFbDgmrr_j27zln4yKHMCrtANYP7EqxMsRaTEk--VsU5lTQypwz6ar_UtGZPFyve4AaVl0n4M5aqogZdqxBbVvl1firwInx_9D6sCdcUjNqeMVROzfiZ8ea-8v8Q";
+//const yourBearerToken ="eyJraWQiOiJZUU5JbzV0WnQ3UFZBbnRwNTZWYUhoVVJBSzJmOGlcL1FPbktvQTk4XC9wYzg9IiwiYWxnIjoiUlMyNTYifQ.eyJzdWIiOiI4MjNjMDkxNi05ZTlkLTRhOWMtODEzZi1hZDJjMDllYWMzOGIiLCJ6b25laW5mbyI6InRydWUiLCJlbWFpbF92ZXJpZmllZCI6ZmFsc2UsImlzcyI6Imh0dHBzOlwvXC9jb2duaXRvLWlkcC5hcC1zb3V0aC0xLmFtYXpvbmF3cy5jb21cL2FwLXNvdXRoLTFfZlhtWWxiZFlKIiwicGhvbmVfbnVtYmVyX3ZlcmlmaWVkIjp0cnVlLCJjb2duaXRvOnVzZXJuYW1lIjoiODIzYzA5MTYtOWU5ZC00YTljLTgxM2YtYWQyYzA5ZWFjMzhiIiwiZ2l2ZW5fbmFtZSI6Illhc2h3YW50aCIsImF1ZCI6IjV2ZTh1Z3ZtMTFkM2U2YWoxZWtobWpkbW04IiwiZXZlbnRfaWQiOiJlMTJiNzcxYS1iYTA0LTQwYWItYjU0OC1mNGZjMjEyZDk1YmEiLCJ0b2tlbl91c2UiOiJpZCIsImF1dGhfdGltZSI6MTcyNTAwMTEzNiwicGhvbmVfbnVtYmVyIjoiKzkxMTExMDAwNDQxMCIsImV4cCI6MTcyNTA4NzUzNiwiaWF0IjoxNzI1MDAxMTM2LCJmYW1pbHlfbmFtZSI6IkdDLTQiLCJlbWFpbCI6InRlc3RAZ21haWwuY29tIn0.skQdAIUOclu5_NexfyfjtrmKxc0gltNN5TZdZFjPiDQFi7LQoBtf6qnTX-3pJz9ClIkoukqsd1T7GssukEBkgt9HL9T9r0EtuGwicSb3-MV28_cqbOKlov_dycAHFHNhVUZWs_xpqdd9AM-i9SApj236cSmOA3reDo2mehy94gIMZGahEaKGx2ynSXcv_G3MXB0yw-UQjCHz1dF0Q0BsEeV0b-hFbDgmrr_j27zln4yKHMCrtANYP7EqxMsRaTEk--VsU5lTQypwz6ar_UtGZPFyve4AaVl0n4M5aqogZdqxBbVvl1firwInx_9D6sCdcUjNqeMVROzfiZ8ea-8v8Q";
 import { Request, Response } from 'express';
 
 
@@ -28,8 +28,7 @@ export const handleLambdaEvents = async (req: Request<any, any, InputEventData>,
     console.log("handleLambdaEvents : "+inputEventData.tenantParticipants);
     const tenantUserId = inputEventData.tenantParticipants[0]?.userId; // Using optional chaining to avoid errors if the array is empty
 
-    // Create query payload for ElasticSearch (searchInES API)
-    const esQueryPayload = {
+/*    const esQueryPayload = {
       index: "calendar_events",
       query: {
         bool: {
@@ -82,9 +81,9 @@ export const handleLambdaEvents = async (req: Request<any, any, InputEventData>,
       console.log("calendarEvents get resp"+calendarEvents);
 
     }
-    const calendarEvents = esResponse.data.body;
 
-    // Fetch calendar sync settings using the userId from the event data
+    const calendarEvents = esResponse.data.body;
+8*/    // Fetch calendar sync settings using the userId from the event data
     const calendarSyncSettings = await getCalendarSyncSettings(inputEventData.userId);
 
     // Call syscal_config API with the sync settings and input event data
@@ -109,11 +108,7 @@ export const handleLambdaEvents = async (req: Request<any, any, InputEventData>,
 // Helper function to get calendar sync settings by userId 
 const getCalendarSyncSettings = async (userId: string) => {
   try {
-    const response = await axios.get(`http://localhost:3000/scheduler/event/getSyncSettings/${userId}`, {
-      headers: {
-        Authorization: `Bearer ${yourBearerToken}`, // Replace with your actual token
-      }
-    });
+    const response = await axios.get(`http://localhost:3000/scheduler/event/getSyncSettings/${userId}`);
     
     // Ensure response is an array before returning
     if (response.status === 200 && Array.isArray(response.data)) {

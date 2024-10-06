@@ -10,13 +10,39 @@ import { simpleParser } from 'mailparser';
 import nodemailer from 'nodemailer';
 import calendarRouter from './routes/calendarRoutes';
 import { setupSwagger } from './swaggerConfig';
-import { watchGoogleCalendar, syncOldGoogleCalendarEvents, processWebhookEvent, createEvent, getEvents ,syncEventsForCalSyncConfig,} from './controllers/calendarController';
+import { getEventDetails,handleOAuthCallback, syncOldGoogleCalendarEvents, processWebhookEvent, createEvent, getEvents ,syncEventsForCalSyncConfig,} from './controllers/calendarController';
 import { checkAndRefreshToken, refreshTokenScheduler } from './tokenManager';
 import axios from 'axios';
+import { AxiosResponse } from 'axios';
+
 //import handleLambdaEvents from './handleLambdaEvents'
 import { handleLambdaEvents } from "./handleLambdaEvents"
 // const mongoose = require('mongoose');
 
+// Define types for your response
+interface CalendarSyncResponse {
+  status: number;
+  message: string;
+  item: {
+    part_key: string;
+    sort_key: string;
+    id: string;
+    pms_cal_id: string;
+    email: string;
+    cal_type: string;
+    token_type: string;
+    api_key: string;
+    temp_api_key: string | null;
+    expiry_time_key: number;
+    is_sync_enabled: boolean;
+    last_sync_time: string;
+  };
+}
+interface CalendarSyncSetting {
+  sort_key: string; // Ensure this matches the actual property names in your data
+  temp_api_key: string; // Assuming you have this field to check against token
+  // Add any other properties that you expect in the setting
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -50,7 +76,7 @@ const tokenPath = path.join(__dirname, '..', 'token.json');
  *       302:
  *         description: Redirect to Google OAuth.
  */
-app.get('/auth', (req, res) => {
+app.get('/calender/auth-google', (req, res) => {
   const authUrl = oAuth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: [
@@ -58,7 +84,7 @@ app.get('/auth', (req, res) => {
       'https://www.googleapis.com/auth/userinfo.profile', // Scope for user profile info
       'https://www.googleapis.com/auth/userinfo.email'   // Scope for user email info
     ],
-    redirect_uri: process.env.REDIRECT_URI_4
+    redirect_uri:"http://localhost:8080/callback"// TODO use  process.env.WEB_APP_BASE_URL + "/callback/oauth-google/user/" //TODO add userId to the url
   });
   
 
@@ -85,7 +111,7 @@ app.get('/auth', (req, res) => {
  *         description: Code not found in query parameters
  *       500:
  *         description: Authentication failed
- */app.get('/', async (req, res) => {
+ */app.get('/callback', async (req, res) => {//TODO add  ${userid} & /callback/oauth-google/user/
   const code = req.query.code as string | undefined;
 
   if (code) {
@@ -95,12 +121,11 @@ app.get('/auth', (req, res) => {
 
       // Save tokens to a file
       fs.writeFileSync(path.join(__dirname, '..', 'token.json'), JSON.stringify(tokens));
-      //fs.writeFileSync(path.join(__dirname, '..', 'email.txt'), tokens.access_token);
 
       // Fetch the user's profile
       const oauth2 = google.oauth2({ auth: oAuth2Client, version: 'v2' });
       const userInfo = await oauth2.userinfo.get();
-console.log("tokens.refresh_token"+tokens.refresh_token)
+      console.log("tokens.refresh_token"+tokens.refresh_token)
       const email = userInfo.data.email || 'unknown';
       const calendarData = {
         userId: "859deb6d-3efa-4e5b-8d52-fbaba74832dd",
@@ -108,28 +133,31 @@ console.log("tokens.refresh_token"+tokens.refresh_token)
         email: email,
         cal_type: 'Google Calendar',
         token_type: "OAuth2",
-        api_key: tokens.access_token,
-        temp_api_key: tokens.refresh_token,
+        api_key: tokens.access_token, // tokens 
+        temp_api_key: tokens.refresh_token,// is null
         expiry_time_key: tokens.expiry_date,
         is_sync_enabled: true,
         last_sync_time: new Date().toISOString(),
       };
 
+      //TODO call method SchedulerController.saveCalendarSyncSettings inside the calling api 
       // Make a POST request to save the calendar sync settings
-      const response = await axios.post(
+      const response: AxiosResponse<CalendarSyncResponse> = await axios.post(
         'http://localhost:3000/scheduler/event/syncSettings',
         calendarData,
         {
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.CUSTOM_API_TOKEN}`,
+            Authorization: `Bearer ${process.env.CUSTOM_API_TOKEN}`,
           },
         }
       );
+    //TODO handleOAuthCallback(code as string, res); Call subcription code
 
       // Send response based on the result of the POST request
       if (response.status === 200) {
         res.send('Authentication successful and calendar sync settings saved! You can close this tab.');
+        await handleOAuthCallback(response.data, code, res);
       } else {
         res.status(response.status).send('Failed to save calendar sync settings.');
       }
@@ -184,20 +212,86 @@ app.get('/sync', async (req, res) => {
  *       500:
  *         description: Error syncing events
  */
-app.get('/webhookcall', async (req, res) => {
+
+// Webhook endpoint to handle Google Calendar notifications
+app.post('/webhook/calendar/oauth-google', async (req, res) => {
+  const resourceId = req.headers['x-goog-resource-id'];
+  const channelId = req.headers['x-goog-channel-id'] as string | undefined;
+  const token = req.headers['x-goog-channel-token'] as string | undefined;
+  const eventID = req.headers['x-goog-event-id'];
+
+  // Check if channelId exists
+  if (!channelId) {
+    return res.status(400).send('Missing channelId');
+  }
+
+  // Separate part_key and sort_key
+  const indexOfSortKey = channelId.indexOf('CALENDAR#');
+  if (indexOfSortKey === -1) {
+    return res.status(400).send('Invalid channelId format');
+  }
+
+  const part_key = channelId.slice(0, indexOfSortKey);  // Extract part_key
+  const sort_key = channelId.slice(indexOfSortKey);     // Extract sort_key
+
+  // Fetch the data from the API using the sort_key
   try {
-    const tokens = JSON.parse(fs.readFileSync(path.join(__dirname, '../token.json'), 'utf-8'));
-    oAuth2Client.setCredentials(tokens);
-    
-    // Pass the request and response objects to watchGoogleCalendar
-    await watchGoogleCalendar(req, res);
-    
-    // No need to send another response, as watchGoogleCalendar already sends one
+    const calendarSyncSettings: CalendarSyncSetting[] = await getCalendarSyncSettingsFromAPI(sort_key);
+
+    if (!calendarSyncSettings || calendarSyncSettings.length === 0) {
+      return res.status(404).send('Calendar sync settings not found');
+    }
+
+    // Check if any sort_key in the settings matches the incoming token
+    const validSetting = calendarSyncSettings.find((setting: CalendarSyncSetting) => setting.sort_key === token);
+
+    if (!validSetting) {
+      return res.status(403).send('Invalid token');
+    }
+
+    console.log(`Received notification for resource ID: ${resourceId}`);
+    console.log(`Event ID: ${eventID}`);
+
+    // Ensure eventID is a string before using it
+    if (typeof eventID === 'string') {
+      const eventDetails = await getEventDetails(eventID);
+      console.log('Event Details:', eventDetails);
+    }
+
+    // Send back a success response
+    res.status(200).send('Notification received');
   } catch (error) {
-    console.error('Error syncing old events:', error);
-    res.status(500).send('Error syncing events.');
+    console.error('Error processing webhook:', error);
+    res.status(500).send('Error processing webhook');
   }
 });
+
+// Function to get calendar sync settings from external API by sort_key
+const getCalendarSyncSettingsFromAPI = async (sort_key: string): Promise<CalendarSyncSetting[]> => {
+  try {
+    const response = await axios.get(
+      `http://localhost:3000/scheduler/event/getSyncSettings/${sort_key}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.CUSTOM_API_TOKEN}`,  
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    if (response.status === 200) {
+      return response.data;
+    } else {
+      console.error('Failed to fetch calendar sync settings:', response.statusText);
+      return []
+    }
+  } catch (error) {
+    console.error('Error fetching calendar sync settings:', error);
+    throw error;
+  }
+};
+
+
 
 // Serve static files (if needed)
 app.use('/calendar', checkAndRefreshToken, calendarRouter);
@@ -251,4 +345,41 @@ app.get('/auth/microsoft/callback', async (req, res) => {
   }
 });
 
+app.post('/webhook/calendar/oauth-google', (req, res) => {
+  const resourceId = req.headers['x-goog-resource-id'];
+  const channelId = req.headers['x-goog-channel-id'];
+  const token = req.headers['x-goog-channel-token'];
+  const eventID = req.headers['x-goog-event-id'];
+  console.log(eventID)
+  // Check if channelId exists
+  if (!channelId) {
+  return res.status(400).send('Missing channelId');
+  }
+
+  // Separate part_key and sort_key
+  const indexOfSortKey = channelId.indexOf('CALENDAR#');
+  if (indexOfSortKey === -1) {
+    return res.status(400).send('Invalid channelId format');
+  }
+  if (typeof eventID === 'string') {
+    // Call getEventDetails with await inside async function
+    const eventDetails =  getEventDetails(eventID);
+    console.log(eventDetails);
+  } else {
+    return res.status(400).send('Invalid or missing event ID');
+  }
+
+
+  //TODO parse channelId & get cal config data from Db 
+  //TODO Verify the token 
+  if (false) {
+      return res.status(403).send('Invalid token');
+  }
+
+  console.log(`Received notification for resource ID: ${resourceId}`);
+  // Further processing...
+  //TODO GetEventdataByEventId
+  //TODO createEvent in amura 
+  res.status(200).send('Notification received');
+});
 */

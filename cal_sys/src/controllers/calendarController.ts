@@ -9,6 +9,28 @@ import { calculateDuration, calculateDurations } from '../utils/utils'; // Corre
 import { Client } from '@microsoft/microsoft-graph-client';
 
 
+
+
+// Define types for your response
+interface CalendarSyncResponse {
+  status: number;
+  message: string;
+  item: {
+    part_key: string;
+    sort_key: string;
+    id: string;
+    pms_cal_id: string;
+    email: string;
+    cal_type: string;
+    token_type: string;
+    api_key: string;
+    temp_api_key: string | null;
+    expiry_time_key: number;
+    is_sync_enabled: boolean;
+    last_sync_time: string;
+  };
+}
+
 let isSyncBoolean: boolean = false;
 let oldSyncBoolean: boolean = false;
 // Load OAuth 2.0 credentials
@@ -47,49 +69,76 @@ async function authenticate() {
   }
 }
 
-// Watch for changes in Google Calendar
-export const watchGoogleCalendar = async (req: Request, res: Response) => {
-  try {
-    await authenticate();
-
-    const uniqueChannelId = uuidv4(); // Generate a unique ID
-
-    const response = await calendar.events.watch({
-      calendarId: 'primary',
-      requestBody: {
-        id: uniqueChannelId,
-        type: 'web_hook',
-        address: 'https://eoi7erk35cc5yfe.m.pipedream.net/'
-      }
-    });
-
-    console.log('Watch response:', response.data);
-    res.status(200).json(response.data);
-  } catch (error) {
-    console.error('Error setting up calendar watch:', error);
-    res.status(500).json({
-      error:
-        error instanceof Error ? error.message : 'An unknown error occurred'
-    });
-  }
+export const getAuthUrl = (): string => {
+  return oAuth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: [
+      'https://www.googleapis.com/auth/calendar',
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/userinfo.email',
+    ],
+  });
+};
+// Function to watch the Google Calendar
+const watchCalendar = async (
+  responses: CalendarSyncResponse,
+  userEmail: string,
+ oauth2Client: any) => {
+  const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+ const part_key = responses.item.part_key
+ const sort_key = responses.item.sort_key  
+const channelID=part_key+sort_key
+  const response = await calendar.events.watch({
+    calendarId: 'primary',
+    requestBody: {
+      id: `channel-${channelID}`, 
+      type: 'webhook',
+      address: process.env.WEB_APP_BASE_URL + "/webhook/calendar/oauth-google",
+      token: sort_key,
+    },
+  });
+  return response.data;
 };
 
-async function getEventDetails(
+export async function getEventDetails(
   eventId: string
 ): Promise<calendar_v3.Schema$Event> {
   try {
+    await authenticate() 
     const response = await calendar.events.get({
       calendarId: 'primary',
       eventId: eventId
     });
-
     return response.data;
   } catch (error) {
     console.error('Error fetching event details:', error);
     throw new Error('Failed to fetch event details');
   }
 }
+export const handleOAuthCallback = async (
+  response: CalendarSyncResponse,
+  code: string,
+  res: Response
+) => {
+  try {
+    const { tokens } = await oAuth2Client.getToken(code);
+    oAuth2Client.setCredentials(tokens);
 
+    
+    // Fetch user's profile
+    const oauth2 = google.oauth2({ auth: oAuth2Client, version: 'v2' });
+    const userInfo = await oauth2.userinfo.get();
+    const email = userInfo.data.email || 'unknown';
+
+    // Watch calendar for events
+    await watchCalendar(response, email, oAuth2Client);
+
+    res.send('Authentication successful and calendar sync settings saved!');
+  } catch (error) {
+    console.error('Error during OAuth callback:', error);
+    res.status(500).send('Authentication failed.');
+  }
+};
 // Function to get authenticated user's email
 async function getAuthenticatedUserEmail(): Promise<string> {
   const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
@@ -158,11 +207,10 @@ export const processWebhookEvent = async (req: Request, res: Response) => {
 
     // Send the event data to the Amura API
     const customApiResponse = await axios.post(
-      `${baseURL}/scheduler/event/createEvent`,
+      `${baseURL}/scheduler/event/create`,
       eventData,
       {
         headers: {
-          Authorization: `Bearer ${customApiToken}`,
           'Content-Type': 'application/json'
         }
       }
@@ -661,7 +709,7 @@ async function authenticateTokenfromDb(accessToken: string, refreshToken: string
       access_token: accessToken, // Use the provided access token
       refresh_token: refreshToken, // Use the provided refresh token
     });
-
+   // oAuth2Client.setCredentials(accessToken);
     // Try to refresh the access token
     const refreshResponse = await oAuth2Client.refreshAccessToken();
 
@@ -746,7 +794,7 @@ export const createGoogleEvent = async (
     const googleResponse = await calendar.events.insert({
       calendarId: 'primary',  // Primary calendar of the authenticated user
       requestBody: event,
-      auth: oAuth2Client,     // Pass the authenticated client (with valid access token)
+      auth: oAuth2Client,    
     });
 
     console.log('Event created successfully:', googleResponse.data);

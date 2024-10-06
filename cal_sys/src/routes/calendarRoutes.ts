@@ -4,7 +4,6 @@ import {
   updateEvent, 
   deleteEvent, 
   getEvents, 
-  watchGoogleCalendar, 
   handleCalendarWebhook, 
   syncOldGoogleCalendarEvents 
 } from '../controllers/calendarController';
@@ -141,17 +140,6 @@ router.delete('/events', deleteEvent);
  */
 router.post('/webhook', handleCalendarWebhook);
 
-/**
- * @swagger
- * /calendar/watch:
- *   get:
- *     summary: Watch Google Calendar for changes
- *     description: Setup a push notification to monitor changes in Google Calendar
- *     responses:
- *       200:
- *         description: Watching for calendar changes successfully
- */
-router.get('/watch', watchGoogleCalendar);
 
 /**
  * @swagger
