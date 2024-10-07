@@ -14,30 +14,29 @@ import { getEventDetails,handleOAuthCallback, syncOldGoogleCalendarEvents, proce
 import { checkAndRefreshToken, refreshTokenScheduler } from './tokenManager';
 import axios from 'axios';
 import { AxiosResponse } from 'axios';
-
-//import handleLambdaEvents from './handleLambdaEvents'
+import {handleLambdaUpdateEvent} from './handleLambdaUpdateEvent'
 import { handleLambdaEvents } from "./handleLambdaEvents"
-// const mongoose = require('mongoose');
+import { Request, Response } from 'express';
 
-// Define types for your response
+// const mongoose = require('mongoose');
+// Define the interface for the response
 interface CalendarSyncResponse {
   status: number;
   message: string;
   item: {
     part_key: string;
     sort_key: string;
-    id: string;
+    id: number;
     pms_cal_id: string;
     email: string;
     cal_type: string;
     token_type: string;
-    api_key: string;
-    temp_api_key: string | null;
-    expiry_time_key: number;
+    full_token: string;  // Full token serialized as a JSON string
     is_sync_enabled: boolean;
     last_sync_time: string;
   };
 }
+
 interface CalendarSyncSetting {
   sort_key: string; // Ensure this matches the actual property names in your data
   temp_api_key: string; // Assuming you have this field to check against token
@@ -52,10 +51,10 @@ setupSwagger(app);
 const oAuth2Client = new google.auth.OAuth2(
   process.env.CLIENT_ID,
   process.env.CLIENT_SECRET,
-  process.env.REDIRECT_URI_4
+  process.env.WEB_APP_BASE_URL + "/callback/oauth-google/user"
 );
 
-
+//update , delete both side 
 
 /*
 async function getUserEmail() {
@@ -84,7 +83,7 @@ app.get('/calender/auth-google', (req, res) => {
       'https://www.googleapis.com/auth/userinfo.profile', // Scope for user profile info
       'https://www.googleapis.com/auth/userinfo.email'   // Scope for user email info
     ],
-    redirect_uri:"http://localhost:8080/callback"// TODO use  process.env.WEB_APP_BASE_URL + "/callback/oauth-google/user/" //TODO add userId to the url
+    redirect_uri:  process.env.WEB_APP_BASE_URL + "/callback/oauth-google/user" //TODO add userId to the url
   });
   
 
@@ -111,7 +110,7 @@ app.get('/calender/auth-google', (req, res) => {
  *         description: Code not found in query parameters
  *       500:
  *         description: Authentication failed
- */app.get('/callback', async (req, res) => {//TODO add  ${userid} & /callback/oauth-google/user/
+ */app.get('/callback/oauth-google/user', async (req, res) => {//TODO add  ${userid} & /callback/oauth-google/user/
   const code = req.query.code as string | undefined;
 
   if (code) {
@@ -125,7 +124,6 @@ app.get('/calender/auth-google', (req, res) => {
       // Fetch the user's profile
       const oauth2 = google.oauth2({ auth: oAuth2Client, version: 'v2' });
       const userInfo = await oauth2.userinfo.get();
-      console.log("tokens.refresh_token"+tokens.refresh_token)
       const email = userInfo.data.email || 'unknown';
       const calendarData = {
         userId: "859deb6d-3efa-4e5b-8d52-fbaba74832dd",
@@ -133,9 +131,10 @@ app.get('/calender/auth-google', (req, res) => {
         email: email,
         cal_type: 'Google Calendar',
         token_type: "OAuth2",
-        api_key: tokens.access_token, // tokens 
-        temp_api_key: tokens.refresh_token,// is null
-        expiry_time_key: tokens.expiry_date,
+        full_token: JSON.stringify(tokens),  
+       //api_key: tokens.access_token, // tokens 
+       //temp_api_key: tokens.refresh_token,// is null
+       //expiry_time_key: tokens.expiry_date,
         is_sync_enabled: true,
         last_sync_time: new Date().toISOString(),
       };
@@ -291,6 +290,106 @@ const getCalendarSyncSettingsFromAPI = async (sort_key: string): Promise<Calenda
   }
 };
 
+// Webhook handler for Google Calendar updates
+app.post('/google-calendar-webhook', async (req: Request, res: Response) => {//TODO change api 
+  try {
+    const webhookPayload = req.body;
+
+    // Extract the relevant eventId and calendarId from the webhook notification
+    const { eventId, calendarId } = webhookPayload;
+    //TODO eventType == update
+    // Fetch full event details from Google Calendar
+    const eventDetails = await fetchGoogleCalendarEventDetails(calendarId, eventId);
+
+    if (!eventDetails) {
+      return res.status(404).json({ message: 'Event not found' });
+    }
+
+    // Process the full event data and prepare the payload
+    const payload = mapEventDetailsToPayload(eventDetails);
+
+    // Send the payload to your updateEvent API
+    const updateEventResponse = await axios.post('http://localhost:3000/scheduler/event/updateEvent', payload);
+
+    // Send success response
+    return res.status(200).json({ message: 'Event data processed and forwarded', updateEventResponse: updateEventResponse.data });
+
+  } catch (error) {
+    console.error('Error in Google Calendar webhook handler:', error);
+    return res.status(500).json({ message: 'Internal server error', error: error });
+  }
+});
+
+// Function to fetch full event details from Google Calendar API
+const fetchGoogleCalendarEventDetails = async (calendarId: string, eventId: string) => {
+  try {
+    const response = await axios.get(
+      `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${eventId}`,
+      {
+        headers: {
+          Authorization: `Bearer YOUR_ACCESS_TOKEN`, // Use the valid OAuth token
+        },
+      }
+    );
+    return response.data; // Return the full event details
+  } catch (error) {
+    console.error('Error fetching event details:', error);
+    return null;
+  }
+};
+
+// Utility function to map Google Calendar event data to your payload
+const mapEventDetailsToPayload = (googleEvent: any) => {
+  return {
+    eventId: googleEvent.id,
+    parentId: googleEvent.recurringEventId || '',
+    organizer: googleEvent.organizer.email,
+    title: googleEvent.summary || 'No title',
+    eventType: 'events',
+    tenantName: 'amura',
+    eventDate: googleEvent.start.dateTime || googleEvent.start.date,
+    fromTime: googleEvent.start.dateTime || googleEvent.start.date,
+    toDate: googleEvent.end.dateTime || googleEvent.end.date,
+    toTime: googleEvent.end.dateTime || googleEvent.end.date,
+    duration: calculateDuration(googleEvent.start, googleEvent.end),
+    timeZone: googleEvent.start.timeZone || 'indianStandardTime',
+    repeatType: googleEvent.recurrence ? 'recurring' : 'doesntRepeat',
+    reccurance: googleEvent.recurrence || {},
+    tenantId: 'amura',
+    notify: ['10 minutes before'],
+    tenantParticipants: [
+      {
+        userId: googleEvent.organizer.email,
+        roleId: 'L1 - Treating Doctor',
+      },
+    ],
+    externalParticipants: googleEvent.attendees?.map((attendee: any) => ({
+      userId: attendee.email,
+      roleId: 'Participant',
+    })) || [],
+    isExcludeMeFromEvent: false,
+    callType: googleEvent.conferenceData ? 'video' : 'none',
+    description: googleEvent.description || '',
+    others: '',
+    visibility: googleEvent.visibility || 'public',
+    status: googleEvent.status || 'busy',
+    permissons: ['None'],
+    organizerRoleId: 'L1 - Treating Doctor',
+    action: {
+      thisEvent: true,
+      allEvents: false,
+      value: 'update',
+    },
+    notifyTimeInMinutes: [10],
+  };
+};
+
+// Utility function to calculate event duration
+const calculateDuration = (start: any, end: any) => {
+  const startTime = new Date(start.dateTime || start.date).getTime();
+  const endTime = new Date(end.dateTime || end.date).getTime();
+  return (endTime - startTime) / 60000; // Convert milliseconds to minutes
+};
 
 
 // Serve static files (if needed)
@@ -301,6 +400,8 @@ app.use('/calendar', calendarRouter);
 app.use('/syscal_config',syncEventsForCalSyncConfig)
 
 app.post('/calltestfunc', handleLambdaEvents);
+app.post('/calltestupdate', handleLambdaUpdateEvent);
+
 
 
 // Start server

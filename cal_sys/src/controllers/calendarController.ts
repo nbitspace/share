@@ -18,18 +18,17 @@ interface CalendarSyncResponse {
   item: {
     part_key: string;
     sort_key: string;
-    id: string;
+    id: number;
     pms_cal_id: string;
     email: string;
     cal_type: string;
     token_type: string;
-    api_key: string;
-    temp_api_key: string | null;
-    expiry_time_key: number;
+    full_token: string;  // Full token serialized as a JSON string
     is_sync_enabled: boolean;
     last_sync_time: string;
   };
 }
+
 
 let isSyncBoolean: boolean = false;
 let oldSyncBoolean: boolean = false;
@@ -121,11 +120,14 @@ export const handleOAuthCallback = async (
   res: Response
 ) => {
   try {
-    const { tokens } = await oAuth2Client.getToken(code);
-    oAuth2Client.setCredentials(tokens);
+  // Deserialize the full token from the response
+  const fullToken = JSON.parse(response.item.full_token);
+    
+  // Set the credentials to the OAuth2 client using the full token
+  oAuth2Client.setCredentials(fullToken);
 
     
-    // Fetch user's profile
+    // Fetch user's profile using the full token
     const oauth2 = google.oauth2({ auth: oAuth2Client, version: 'v2' });
     const userInfo = await oauth2.userinfo.get();
     const email = userInfo.data.email || 'unknown';
@@ -700,15 +702,11 @@ async function authenticateTokenfromDbUser(token: string) {
 
 
 // Function to authenticate token from the database
-async function authenticateTokenfromDb(accessToken: string, refreshToken: string) {
-  console.log("authenticateTokenfromDb method. refreshToken Token: " + refreshToken);
+async function authenticateTokenfromDb(token: string) {
 
   try {
     // Set the access token and refresh token
-    oAuth2Client.setCredentials({
-      access_token: accessToken, // Use the provided access token
-      refresh_token: refreshToken, // Use the provided refresh token
-    });
+ //   oAuth2Client.setCredentials({token});
    // oAuth2Client.setCredentials(accessToken);
     // Try to refresh the access token
     const refreshResponse = await oAuth2Client.refreshAccessToken();
@@ -756,14 +754,23 @@ async function reauthenticateUser() {
 
 export const createGoogleEvent = async (
   data: CreateGoogleEventData, 
-  accessToken: string, 
-  refreshToken: string
+  responses: CalendarSyncResponse, // The response containing full_token
 ) => {
   try {
     console.log("createGoogleEvent Method");
 
-    // Authenticate and refresh token if necessary
-    await authenticateTokenfromDb(accessToken, refreshToken); // Pass both tokens
+    // Extract the full_token from the response
+    const { full_token } = responses.item;
+
+    const parsedToken = JSON.parse(full_token);
+
+    // Set the credentials to the OAuth2 client using the full token
+    oAuth2Client.setCredentials(parsedToken);
+
+    // Fetch user's profile using the OAuth2 client with the full token
+    const oauth2 = google.oauth2({ auth: oAuth2Client, version: 'v2' });
+
+    await authenticateTokenfromDb(full_token);
 
     // Map the time zone for the event
     const timeZone = mapTimeZone(data.timeZone);
@@ -1409,7 +1416,7 @@ export const syncEventsForCalSyncConfig = async (req: any, res: any) => {
               // Sync events based on calendar type
               if (config.cal_type === "google") {
                 console.log('Call Google event create:', reqData);
-                await createGoogleEvent(reqData, config.api_key ,config.temp_api_key);
+                await createGoogleEvent(reqData, config);
               } else if (config.cal_type === "Microsoft Calendar") {
                 console.log('Creating event in Microsoft Calendar...');
                 // await createMicrosoftCalendarEvents(reqData, config.api_key);
