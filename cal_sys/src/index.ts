@@ -10,7 +10,7 @@ import { simpleParser } from 'mailparser';
 import nodemailer from 'nodemailer';
 import calendarRouter from './routes/calendarRoutes';
 import { setupSwagger } from './swaggerConfig';
-import { getEventDetails,handleOAuthCallback, syncOldGoogleCalendarEvents, processWebhookEvent, createEvent, getEvents ,syncEventsForCalSyncConfig,} from './controllers/calendarController';
+import {authenticateTokenfromDb,syncEventsForCalSyncAndUpdateData,syncEventsForCalSyncAndDeleteData,syncEventsForCalSyncAndPostData,  getEventDetails,handleOAuthCallback, syncOldGoogleCalendarEvents, processWebhookEvent, createEvent, getEvents ,syncEventsForCalSyncConfig,} from './controllers/calendarController';
 import { checkAndRefreshToken, refreshTokenScheduler } from './tokenManager';
 import axios from 'axios';
 import { AxiosResponse } from 'axios';
@@ -83,7 +83,7 @@ app.get('/calender/auth-google', (req, res) => {
       'https://www.googleapis.com/auth/userinfo.profile', // Scope for user profile info
       'https://www.googleapis.com/auth/userinfo.email'   // Scope for user email info
     ],
-    redirect_uri:  process.env.WEB_APP_BASE_URL + "/callback/oauth-google/user" //TODO add userId to the url
+    redirect_uri:  process.env.WEB_APP_BASE_URL + "/callback/oauth-google/" //TODO add userId to the url
   });
   
 
@@ -110,7 +110,7 @@ app.get('/calender/auth-google', (req, res) => {
  *         description: Code not found in query parameters
  *       500:
  *         description: Authentication failed
- */app.get('/callback/oauth-google/user', async (req, res) => {//TODO add  ${userid} & /callback/oauth-google/user/
+ */app.get('/callback/oauth-google', async (req, res) => {//TODO add  ${userid} & /callback/oauth-google/user/
   const code = req.query.code as string | undefined;
 
   if (code) {
@@ -211,8 +211,6 @@ app.get('/sync', async (req, res) => {
  *       500:
  *         description: Error syncing events
  */
-
-// Webhook endpoint to handle Google Calendar notifications
 app.post('/webhook/calendar/oauth-google', async (req, res) => {
   const resourceId = req.headers['x-goog-resource-id'];
   const channelId = req.headers['x-goog-channel-id'] as string | undefined;
@@ -229,20 +227,19 @@ app.post('/webhook/calendar/oauth-google', async (req, res) => {
   if (indexOfSortKey === -1) {
     return res.status(400).send('Invalid channelId format');
   }
-
   const part_key = channelId.slice(0, indexOfSortKey);  // Extract part_key
   const sort_key = channelId.slice(indexOfSortKey);     // Extract sort_key
 
   // Fetch the data from the API using the sort_key
   try {
-    const calendarSyncSettings: CalendarSyncSetting[] = await getCalendarSyncSettingsFromAPI(sort_key);
+    const calendarSyncSettings = await getCalendarSyncSettingsFromAPI(sort_key);
 
     if (!calendarSyncSettings || calendarSyncSettings.length === 0) {
       return res.status(404).send('Calendar sync settings not found');
     }
 
     // Check if any sort_key in the settings matches the incoming token
-    const validSetting = calendarSyncSettings.find((setting: CalendarSyncSetting) => setting.sort_key === token);
+    const validSetting = calendarSyncSettings.find((setting: any) => setting.sort_key === token);
 
     if (!validSetting) {
       return res.status(403).send('Invalid token');
@@ -253,20 +250,66 @@ app.post('/webhook/calendar/oauth-google', async (req, res) => {
 
     // Ensure eventID is a string before using it
     if (typeof eventID === 'string') {
-      const eventDetails = await getEventDetails(eventID);
+      const { full_token } = validSetting.item;
+
+      const parsedToken = JSON.parse(full_token);
+  
+      // Set the credentials to the OAuth2 client using the full token
+      oAuth2Client.setCredentials(parsedToken);
+  
+      // Fetch user's profile using the OAuth2 client with the full token
+      const oauth2 = google.oauth2({ auth: oAuth2Client, version: 'v2' });
+  
+      const eventDetails = await getEventDetails(eventID,full_token);
       console.log('Event Details:', eventDetails);
+
+
+
+      // Determine if it's an update or delete operation
+      const actionType = req.headers['x-goog-resource-state']; // Could be 'exists' for update, 'deleted' for deletion
+
+      if (actionType === 'deleted') {
+        // Handle DELETE
+        const inputEventData = eventDetails;  // Pass the event details to the delete function
+        await syncEventsForCalSyncAndDeleteData({
+          body: {
+            configs: calendarSyncSettings,
+            inputEventData, // Event details for deletion
+          },
+        }, res); // Pass the response object
+      } else if (actionType === 'exists') {
+        // Handle UPDATE
+        const inputEventData = eventDetails;  // Pass the event details to the update function
+        await syncEventsForCalSyncAndUpdateData({
+          body: {
+            configs: calendarSyncSettings,
+            inputEventData, // Event details for updating
+          },
+        }, res); // Pass the response object
+      } else {
+        // Default to creation if not identified as an update or delete
+        const inputEventData = eventDetails;
+        await syncEventsForCalSyncAndPostData({
+          body: {
+            configs: calendarSyncSettings,
+            inputEventData, // Event details for creation
+          },
+        }, res); // Pass the response object
+      }
+      return res.status(200).send('Notification received and processed'); // Send success response
+    } else {
+      return res.status(400).send('Invalid event ID format'); // Handle invalid event ID
     }
 
-    // Send back a success response
-    res.status(200).send('Notification received');
   } catch (error) {
     console.error('Error processing webhook:', error);
-    res.status(500).send('Error processing webhook');
+    return res.status(500).send('Error processing webhook'); // Send error response
   }
 });
 
+
 // Function to get calendar sync settings from external API by sort_key
-const getCalendarSyncSettingsFromAPI = async (sort_key: string): Promise<CalendarSyncSetting[]> => {
+const getCalendarSyncSettingsFromAPI = async (sort_key: string): Promise<CalendarSyncResponse[]> => {
   try {
     const response = await axios.get(
       `http://localhost:3000/scheduler/event/getSyncSettings/${sort_key}`,
@@ -289,6 +332,34 @@ const getCalendarSyncSettingsFromAPI = async (sort_key: string): Promise<Calenda
     throw error;
   }
 };
+
+app.post('/google-calendar-webhook', async (req: Request, res: Response) => {// dont need this api
+  try {
+    const webhookPayload = req.body;
+    const { eventId, calendarId, resourceState } = webhookPayload;
+
+    if (resourceState === 'deleted') {
+      const eventDetails = await fetchGoogleCalendarEventDetails(calendarId, eventId);
+      // const deletePayload = mapDeleteEventPayload(eventDetails);
+      // const deleteEventResponse = await axios.post('http://localhost:3000/scheduler/event/updateEvent', deletePayload);
+      // return res.status(200).json({ message: 'Event deleted', deleteEventResponse: deleteEventResponse.data });
+    } else if (resourceState === 'exists') {
+      // Handle updates or new events
+      const eventDetails = await fetchGoogleCalendarEventDetails(calendarId, eventId);
+      const updatePayload = mapEventDetailsToPayload(eventDetails);
+      const updateEventResponse = await axios.post('http://localhost:3000/scheduler/event/updateEvent', updatePayload);
+      return res.status(200).json({ message: 'Event updated', updateEventResponse: updateEventResponse.data });
+    } else {
+      return res.status(400).json({ message: 'Unsupported resource state' });
+    }
+
+  } catch (error) {
+    console.error('Error in Google Calendar webhook handler:', error);
+    return res.status(500).json({ message: 'Internal server error', error });
+  }
+});
+
+
 
 // Webhook handler for Google Calendar updates
 app.post('/google-calendar-webhook', async (req: Request, res: Response) => {//TODO change api 
@@ -391,6 +462,39 @@ const calculateDuration = (start: any, end: any) => {
   return (endTime - startTime) / 60000; // Convert milliseconds to minutes
 };
 
+// Helper function to get calendar sync settings by pms_cal_id
+const getCalendarSyncSettingsBypmsCalId = async (pms_cal_id: string) => {
+  try {
+    // Make the API call to the backend using axios
+    const response = await axios.get(`http://localhost:3000/scheduler/event/getSyncSettingsByCalId/${pms_cal_id}`);
+    
+    // Ensure the response status is 200 and the data is an array before returning
+    if (response.status === 200 && Array.isArray(response.data)) {
+      return response.data;  // Return the array of sync settings
+    } else {
+      throw new Error('Failed to fetch calendar sync settings by pms_cal_id');
+    }
+  } catch (error) {
+    console.error("Error fetching sync settings by pms_cal_id:", error);
+    throw error;
+  }
+};
+// Helper function to soft delete calendar sync settings by pms_cal_id
+const deleteCalendarSyncSettingsBypmsCalId = async (pms_cal_id: string) => {
+  try {
+    // Make the API call to the backend using axios
+    const response = await axios.post(`http://localhost:3000/scheduler/event/deleteSyncSettingsByCalId/${pms_cal_id}`);
+    
+    if (response.status === 200) {
+      return response.data;  // Return success message
+    } else {
+      throw new Error('Failed to soft delete calendar sync settings by pms_cal_id');
+    }
+  } catch (error) {
+    console.error("Error soft deleting sync settings by pms_cal_id:", error);
+    throw error;
+  }
+};
 
 // Serve static files (if needed)
 app.use('/calendar', checkAndRefreshToken, calendarRouter);
@@ -400,7 +504,9 @@ app.use('/calendar', calendarRouter);
 app.use('/syscal_config',syncEventsForCalSyncConfig)
 
 app.post('/calltestfunc', handleLambdaEvents);
-app.post('/calltestupdate', handleLambdaUpdateEvent);
+app.put('/calltestupdate', handleLambdaUpdateEvent);
+app.get('/getCalendar', getCalendarSyncSettingsBypmsCalId);
+app.put('/getCalendar', deleteCalendarSyncSettingsBypmsCalId);
 
 
 

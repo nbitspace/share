@@ -100,10 +100,12 @@ const channelID=part_key+sort_key
 };
 
 export async function getEventDetails(
-  eventId: string
+  eventId: string,
+  full_token: string
 ): Promise<calendar_v3.Schema$Event> {
   try {
-    await authenticate() 
+    // Authenticate using the passed full_token
+    await authenticateTokenfromDb(full_token);
     const response = await calendar.events.get({
       calendarId: 'primary',
       eventId: eventId
@@ -168,7 +170,7 @@ export const processWebhookEvent = async (req: Request, res: Response) => {
     const userEmail = 'nbitspace01@gmail.com';  //await getAuthenticatedUserEmail();
 
     // Fetch the full event details from Google Calendar using the event ID
-    const eventDetails = await getEventDetails(event_id);
+    const eventDetails = await getEventDetails(event_id,"");
     // Extract event details
     const { summary, start, end, attendees, description, status, visibility } =
       eventDetails;
@@ -702,7 +704,7 @@ async function authenticateTokenfromDbUser(token: string) {
 
 
 // Function to authenticate token from the database
-async function authenticateTokenfromDb(token: string) {
+export async function authenticateTokenfromDb(token: string) {
 
   try {
     // Set the access token and refresh token
@@ -1438,8 +1440,257 @@ export const syncEventsForCalSyncConfig = async (req: any, res: any) => {
     throw error;
   }
 };
+function mapGoogleEventDataToAmura(googleEvent: any, userId: string): any {
+  // You may need to replace these with actual tenant values or fetch from a database
+  const tenantId = "defaultTenantId"; // Replace with actual tenant ID retrieval logic
+  const tenantName = "defaultTenantName"; // Replace with actual tenant name retrieval logic
+
+  // Create the mapping
+  return {
+    userId: userId, // User ID of the event creator
+    organizer: userId, // Assuming the organizer is the same as the user ID
+    title: googleEvent.summary || "", // Event title
+    eventType: "events", // Fixed event type
+    tenantName: tenantName, // Tenant name
+    eventDate: googleEvent.start.dateTime, // Event start date
+    fromTime: googleEvent.start.dateTime, // Start time
+    toTime: googleEvent.end.dateTime, // End time
+    duration: calculateDuration(googleEvent.start.dateTime, googleEvent.end.dateTime), // Calculate duration
+    timeZone: googleEvent.start.timeZone || "indianStandardTime", // Time zone, default to Indian Standard Time
+    repeatType: googleEvent.recurrence ? "customRepeat" : "doesntRepeat", // Determine repeat type based on recurrence
+    recurance: googleEvent.recurrence || {}, // Pass recurrence object if exists
+    tenantId: tenantId, // Tenant ID, use retrieved logic here
+    notify: ["10 minutes before"], // Default notification
+    tenantParticipants: [
+      {
+        userId: userId, // Add tenant participant
+        roleId: "Amura Guidance Counselor Level4", // Default role ID, adjust if necessary
+      },
+    ],
+    externalParticipants: googleEvent.attendees ? googleEvent.attendees.map((attendee: any) => ({
+      email: attendee.email, // Map attendees to external participants
+    })) : [],
+    isExcludeMeFromEvent: false, // Default value, adjust as necessary
+    visibility: googleEvent.visibility || "public", // Default visibility
+    status: "busy", // Default status, adjust if necessary
+    callType: googleEvent.hangoutLink ? "video" : "none", // Check if there's a hangout link for video call
+    others: "", // Placeholder for additional information
+    description: googleEvent.description || "", // Event description
+    permissions: ["None"], // Default permissions
+    organizerRoleId: "Amura Guidance Counselor Level4", // Default role ID for organizer
+    notifyTimeInMinutes: [10], // Notification time in minutes
+  };
+}
+// Main function to sync events and post data
+export const syncEventsForCalSyncAndPostData = async (req: any, res: any) => {
+  const { configs } = req.body; // No need for inputEventData as it's not used in the loop
+  console.log("syncEventsForCalSyncConfig Method: ", configs);
+  if (!configs || configs.length === 0) {
+    console.log("No configs provided or configs is empty.");
+    return res.status(400).send("No configs found.");
+  }
+
+  try {
+    for (const config of configs) {
+      console.log("Syncing events for config: ", config);
+
+      // Check if sync is enabled
+      if (config.is_sync_enabled) {
+        try {
+          // API Call to fetch events
+          const userId = config.part_key.startsWith("USER#") ? config.part_key.split("USER#")[1] : config.part_key;
+
+          // Correct API call with the trimmed userId
+          const esResponse = await axios.get(`http://localhost:3000/events/${userId}`);
+          console.log("API response: ", esResponse.data);
+
+          if (esResponse.data.message === "Success") {
+            const calendarEvents = esResponse.data.body;
+            console.log("Events fetched successfully: ", calendarEvents);
+
+            for (const eventData of calendarEvents) {
+              const eventToCreate = mapGoogleEventDataToAmura(eventData, userId); // Correctly using userId
+              console.log("Mapped event data for Amura: ", eventToCreate);
+
+              // Create the event in Amura service
+              try {
+                await axios.post('http://localhost:3000/scheduler/event/createEvent', eventToCreate);
+                console.log("Event created in Amura:", eventToCreate);
+              } catch (error) {
+                console.error("Error creating event in Amura:", error);
+              }
+            }
+          } else {
+            console.error("Failed to fetch events. Response: ", esResponse.data);
+          }
+        } catch (apiError) {
+          console.error("Error fetching events: ", apiError);
+        }
+      } else {
+        console.log(`Sync is disabled for config ID: ${config.id}`);
+      }
+    }
+  } catch (error) {
+    console.error('Error syncing events:', error);
+    throw error;
+  }}
+  export const syncEventsForCalSyncAndDeleteData = async (req: any, res: any) => {
+    const { configs, inputEventData } = req.body;
+    console.log("syncEventsForCalSyncAndDeleteData: ", configs);
+  
+    try {
+      for (const config of configs) {
+        if (config.is_sync_enabled) {
+          // Map event to Amura format for deletion
+          const deleteEventData = mapGoogleEventDataToAmuraForDelete(inputEventData, config.userId);
+  
+          // Call Amura API to delete the event
+          try {
+            await axios.post('http://localhost:3000/scheduler/event/deleteEvent', deleteEventData);
+            console.log("Event deleted in Amura:", deleteEventData);
+          } catch (error) {
+            console.error("Error deleting event in Amura:", error);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error syncing delete events:', error);
+      throw error;
+    }
+  };
+  
+// Function to map Google Event data to Amura format for deletion
+function mapGoogleEventDataToAmuraForDelete(eventData: any, userId: string) {
+  return {
+    userId,
+    organizer: eventData.organizer || userId, // Default to userId if organizer is missing
+    title: eventData.title || "Untitled Event", // Default title if not present
+    eventType: eventData.eventType || "events", // Default event type if not present
+    timeZone: eventData.timeZone || "IndianStandardTime", // Default time zone
+    tenantName: 'amura', // Static tenant name
+    eventDate: eventData.eventDate || new Date().toISOString(), // Default to current date if not present
+    toDate: eventData.toDate || eventData.eventDate, // Default to eventDate if toDate is missing
+    fromTime: eventData.fromTime || eventData.eventDate, // Default to eventDate if fromTime is missing
+    toTime: eventData.toTime || eventData.eventDate, // Default to eventDate if toTime is missing
+    duration: eventData.duration || 30, // Default duration in minutes
+    repeatType: eventData.repeatType || "none", // Default to no repeat if not specified
+    reccurance: eventData.reccurance || {
+      repeatType: "none", 
+      ends: {
+        afterOccurrences: 1
+      },
+      startDate: new Date().toISOString(),
+      repeatsEvery: 1,
+      monthsOccurance: {
+        monthEndType: "monthlyOnDay",
+        monthlyOnDay: null,
+        monthlyOnWeekday: null,
+        monthlyNthWeekday: null
+      },
+      weekDays: []
+    }, // Default recurrence details
+    tenantId: eventData.tenantId || "amura", // Default tenant ID
+    notify: eventData.notify || ["10 mins"], // Default notification
+    tenantParticipants: eventData.tenantParticipants || [], // Default empty array for participants
+    externalParticipants: eventData.externalParticipants || [], // Default empty array for external participants
+    isExcludeMeFromEvent: eventData.isExcludeMeFromEvent || false, // Default exclusion setting
+    visibility: eventData.visibility || "private", // Default visibility
+    status: eventData.status || "busy", // Default event status
+    callType: eventData.callType || "video", // Default call type
+    others: eventData.others || "", // Default to empty string
+    description: eventData.description || "", // Default to empty description
+    permissions: eventData.permissions || ["modifyEvent"], // Default permissions
+    createdOn: eventData.createdOn || new Date().toISOString(), // Default to current timestamp
+    parentId: eventData.parentId || null, // Default to null for parentId
+    eventId: eventData.eventId, // Must be provided
+    updatedBy: eventData.updatedBy || userId, // Default to userId if updatedBy is missing
+    rsvp: eventData.rsvp || {}, // Default to an empty RSVP object
+    acceptedParticipants: eventData.acceptedParticipants || [], // Default to empty array for accepted participants
+    deleteObject: eventData.deleteObject || { // Default deleteObject if not provided
+      thisEvent: true,
+      allEvents: false,
+      value: "Yes"
+    }
+  };
+}
+export const syncEventsForCalSyncAndUpdateData = async (req: any, res: any) => {
+  const { configs, inputEventData } = req.body;
+  console.log("syncEventsForCalSyncAndUpdateData: ", configs);
+
+  try {
+    for (const config of configs) {
+      if (config.is_sync_enabled) {
+        // Map event to Amura format for update
+        const updateEventData = mapGoogleEventDataToAmuraForUpdate(inputEventData, config.userId);
+
+        // Call Amura API to update the event
+        try {
+          await axios.post('http://localhost:3000/scheduler/event/updateEvent', updateEventData);
+          console.log("Event updated in Amura:", updateEventData);
+        } catch (error) {
+          console.error("Error updating event in Amura:", error);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error syncing update events:', error);
+    throw error;
+  }
+};
 
 
+// Function to map Google Event data to Amura format for updating
+function mapGoogleEventDataToAmuraForUpdate(eventData: any, userId: string) {
+  return {
+    eventId: eventData.eventId, // Must be provided
+    parentId: eventData.parentId || null, // Default to null for parentId
+    organizer: eventData.organizer || userId, // Default to userId if organizer is missing
+    title: eventData.title || "Untitled Event", // Default title if not present
+    eventType: eventData.eventType || "events", // Default event type
+    timeZone: eventData.timeZone || "IndianStandardTime", // Default time zone
+    tenantName: 'amura', // Static tenant name
+    eventDate: eventData.eventDate || new Date().toISOString(), // Default to current date if not present
+    toDate: eventData.toDate || eventData.eventDate, // Default to eventDate if toDate is missing
+    fromTime: eventData.fromTime || eventData.eventDate, // Default to eventDate if fromTime is missing
+    toTime: eventData.toTime || eventData.eventDate, // Default to eventDate if toTime is missing
+    duration: eventData.duration || 30, // Default duration in minutes
+    repeatType: eventData.repeatType || "none", // Default to no repeat if not specified
+    reccurance: eventData.reccurance || {
+      repeatType: "none", 
+      ends: {
+        never: true,
+        afterOccurrences: 1
+      },
+      startDate: new Date().toISOString(),
+      repeatsEvery: 1,
+      monthsOccurance: {
+        monthEndType: "monthlyOnDay",
+        monthlyOnDay: null,
+        monthlyOnWeekday: null,
+        monthlyNthWeekday: null
+      },
+      weekDays: []
+    }, // Default recurrence details
+    tenantId: eventData.tenantId || "amura", // Default tenant ID
+    notify: eventData.notify || ["10 mins"], // Default notification
+    tenantParticipants: eventData.tenantParticipants || [], // Default empty array for participants
+    externalParticipants: eventData.externalParticipants || [], // Default empty array for external participants
+    isExcludeMeFromEvent: eventData.isExcludeMeFromEvent || false, // Default exclusion setting
+    callType: eventData.callType || "video", // Default call type
+    description: eventData.description || "", // Default to empty description
+    others: eventData.others || "", // Default to empty string
+    visibility: eventData.visibility || "private", // Default visibility
+    status: eventData.status || "busy", // Default event status
+    permissions: eventData.permissions || ["modifyEvent"], // Default permissions
+    createdOn: eventData.createdOn || new Date().toISOString(), // Default to current timestamp
+    updatedBy: eventData.updatedBy || userId, // Default to userId if updatedBy is missing
+    action: eventData.action || { // Default action if not provided
+      thisEvent: true,
+      allEvents: false,
+      value: "update"
+    }
+  };
+}
 
 
 // Hypothetical placeholder for Microsoft event creation method
